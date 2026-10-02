@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import datetime as dt
 import html
+import importlib
+import os
 import time
 from zoneinfo import ZoneInfo
 
@@ -18,6 +20,23 @@ from plotly.subplots import make_subplots
 
 import analysis as an
 import data
+
+
+def fresh(mod, *required):
+    """Ξαναφορτώνει ένα δικό μας αρχείο αν άλλαξε.
+
+    Μετά από ενημέρωση κώδικα το Streamlit Cloud ξανατρέχει το app.py αλλά
+    μπορεί να κρατήσει στη μνήμη την παλιά έκδοση των analysis.py / data.py.
+    """
+    mtime = os.path.getmtime(mod.__file__)
+    if getattr(mod, "_mtime", mtime) != mtime or not all(hasattr(mod, r) for r in required):
+        mod = importlib.reload(mod)
+    mod._mtime = mtime
+    return mod
+
+
+an = fresh(an, "trade_signal", "backtest_signals", "signal_levels")
+data = fresh(data)
 
 ATHENS = ZoneInfo("Europe/Athens")
 UP, DOWN, NEUTRAL = "#1f9d55", "#d64545", "#8a8f98"
