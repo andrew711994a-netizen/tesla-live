@@ -51,6 +51,22 @@ st.markdown(
 .state.open {{ background: rgba(31,157,85,.15); color: {UP}; }}
 .state.ext {{ background: rgba(232,145,45,.18); color: {ORANGE}; }}
 .state.closed {{ background: rgba(128,128,128,.18); }}
+.sig {{ border: 1px solid; border-radius: 12px; padding: 14px 16px; margin: 4px 0 10px; }}
+.sig.buy {{ background: rgba(31,157,85,.10); border-color: rgba(31,157,85,.45); }}
+.sig.sell {{ background: rgba(214,69,69,.10); border-color: rgba(214,69,69,.45); }}
+.sig.hold {{ background: rgba(128,128,128,.10); border-color: rgba(128,128,128,.35); }}
+.sig-head {{ display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }}
+.sig-kicker {{ font-size: .78rem; letter-spacing: .04em; opacity: .75; width: 100%; }}
+.sig-label {{ font-size: 1.6rem; font-weight: 800; }}
+.sig.buy .sig-label {{ color: {UP}; }} .sig.sell .sig-label {{ color: {DOWN}; }}
+.sig-str {{ font-size: .9rem; font-weight: 600; opacity: .85; }}
+.sig-score {{ margin-left: auto; font-size: .82rem; opacity: .75; font-variant-numeric: tabular-nums; }}
+.sig-levels {{ display: flex; flex-wrap: wrap; gap: 8px 32px; margin-top: 10px; }}
+.sig-levels .k {{ font-size: .78rem; opacity: .75; }}
+.sig-levels .v {{ font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }}
+.sig-text {{ margin-top: 8px; }}
+.sig-note {{ font-size: .82rem; opacity: .82; margin-top: 8px; }}
+.sig-warn {{ font-size: .85rem; margin-top: 8px; color: {ORANGE}; font-weight: 600; }}
 .live {{ display: flex; flex-wrap: wrap; gap: 14px 40px; align-items: flex-start; margin: 4px 0 8px; }}
 .live .label {{ font-size: .8rem; opacity: .72; margin-bottom: 2px; }}
 .live .price {{ font-size: 2.3rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }}
@@ -248,6 +264,31 @@ with st.spinner("Υπολογίζω δείκτες και πιθανότητες
     ind, signals, probs, vranges = run_analysis(daily_df)
 tech_score = an.score_signals(signals)
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def run_backtest(_ind: pd.DataFrame, key: tuple) -> dict:
+    return an.backtest_signals(_ind)
+
+
+try:
+    with st.spinner("Ελέγχω πόσο έπεφτε μέσα το σήμα στο παρελθόν…"):
+        backtest = run_backtest(ind, (ticker, str(ind.index[-1].date()), len(ind)))
+except Exception:
+    backtest = {}
+
+# Αναλυτές και ημερομηνία αποτελεσμάτων (χρειάζονται και στο σήμα)
+an_data = safe("Αναλυτές", data.analysts, ticker, default={}) or {}
+targets = an_data.get("targets") or {}
+calendar = an_data.get("calendar") or {}
+earnings_date = None
+ed = calendar.get("Earnings Date") if isinstance(calendar, dict) else None
+if ed:
+    first = ed[0] if isinstance(ed, (list, tuple)) else ed
+    try:
+        earnings_date = pd.Timestamp(first).date()
+    except Exception:
+        earnings_date = None
+
 # ---------------------------------------------------------------------------
 # Κεφαλίδα και live τιμή
 # ---------------------------------------------------------------------------
@@ -343,6 +384,60 @@ def check_alerts(price: float):
             st.session_state[fired_key] = None
 
 
+def signal_card(sig: dict, price: float) -> str:
+    a = sig["action"]
+    cls = {"BUY": "buy", "SELL": "sell", "HOLD": "hold"}[a]
+    arrow = {"BUY": "▲", "SELL": "▼", "HOLD": "●"}[a]
+    head = (f'<div class="sig-head"><div class="sig-kicker">ΣΗΜΑ ΤΩΡΑ · ΓΙΑ ΤΙΣ ΕΠΟΜΕΝΕΣ ~2 ΕΒΔΟΜΑΔΕΣ</div>'
+            f'<span class="sig-label">{arrow} {esc(sig["label"])}</span>'
+            + (f'<span class="sig-str">σήμα {esc(sig["strength"])}</span>' if sig["strength"] else "")
+            + f'<span class="sig-score">βαθμός {sig["composite"]:+.0f} από −100 έως +100</span></div>')
+    if a == "HOLD":
+        up, down = sig["up_trigger"], sig["down_trigger"]
+        body = (f'<div class="sig-text">Δεν υπάρχει καθαρή εικόνα αυτή τη στιγμή. Παρακολούθησε:</div>'
+                f'<div class="sig-levels">'
+                f'<div><div class="k">Γίνεται ανοδικό αν περάσει πάνω από</div>'
+                f'<div class="v up">{esc(money(up, currency))} <small>({pct(up / price - 1)})</small></div></div>'
+                f'<div><div class="k">Γίνεται πτωτικό αν πέσει κάτω από</div>'
+                f'<div class="v down">{esc(money(down, currency))} <small>({pct(down / price - 1)})</small></div></div>'
+                f'</div>')
+    else:
+        buy = a == "BUY"
+        tgt_cls, stop_cls = ("up", "down") if buy else ("down", "up")
+        body = (f'<div class="sig-levels">'
+                f'<div><div class="k">{"Στόχος: μέχρι" if buy else "Στόχος: πτώση μέχρι"}</div>'
+                f'<div class="v {tgt_cls}">{esc(money(sig["target"], currency))} '
+                f'<small>({pct(sig["target"] / price - 1)})</small></div></div>'
+                f'<div><div class="k">Το σήμα ακυρώνεται αν {"πέσει κάτω από" if buy else "ανέβει πάνω από"}</div>'
+                f'<div class="v {stop_cls}">{esc(money(sig["stop"], currency))} '
+                f'<small>({pct(sig["stop"] / price - 1)})</small></div></div>'
+                f'<div><div class="k">Πιθανό κέρδος / ρίσκο</div>'
+                f'<div class="v">{pct(sig["reward"], 1, sign=False)} / {pct(sig["risk"], 1, sign=False)}</div></div>'
+                f'</div>')
+    warn = ""
+    if a != "HOLD" and sig["reward"] < sig["risk"]:
+        warn += ('<div class="sig-warn">Το πιθανό κέρδος είναι μικρότερο από το ρίσκο: η τιμή έχει ήδη '
+                 'πλησιάσει τον στόχο, οπότε μια κίνηση τώρα είναι λιγότερο ελκυστική.</div>')
+    if sig["against_trend"]:
+        warn += ('<div class="sig-warn">Προσοχή: το σήμα πάει αντίθετα στη μεγάλη τάση της μετοχής, '
+                 'άρα είναι πιο ριψοκίνδυνο.</div>')
+    if earnings_date and 0 <= (earnings_date - dt.date.today()).days <= 14:
+        warn += (f'<div class="sig-warn">Αποτελέσματα στις {earnings_date:%d/%m}: τότε η μετοχή μπορεί να '
+                 f'περάσει στόχο ή stop με ένα άλμα, και τα σήματα είναι λιγότερο αξιόπιστα.</div>')
+    bt = backtest.get(a) if a != "HOLD" else None
+    hist = ""
+    if bt:
+        hist = (f'<div class="sig-note"><b>Πόσο έπεφτε μέσα:</b> τα τελευταία {backtest["years"]} χρόνια η '
+                f'{esc(ticker)} είχε {bt["n"]} μέρες με τεχνικό σήμα {"αγοράς" if a == "BUY" else "πώλησης"}. '
+                f'Ο στόχος ήρθε πρώτος στο {bt["win"]:.0%}, το stop στο {bt["loss"]:.0%} '
+                f'(και κανένα από τα δύο στο {bt["open"]:.0%}). Μετά από {backtest["horizon"]} συνεδριάσεις η '
+                f'μετοχή είχε πάει προς τη σωστή κατεύθυνση στο {bt["hit"]:.0%} των περιπτώσεων.</div>')
+    why = '<div class="sig-note"><b>Γιατί:</b> ' + " · ".join(esc(r) for r in sig["reasons"]) + "</div>"
+    disclaimer = ('<div class="sig-note">Αυτόματο σήμα από δείκτες και στατιστική. '
+                  'Δεν είναι επενδυτική συμβουλή.</div>')
+    return f'<div class="sig {cls}">{head}{body}{warn}{why}{hist}{disclaimer}</div>'
+
+
 @st.fragment(run_every=refresh)
 def live_header():
     snap = live_snapshot()
@@ -373,8 +468,9 @@ def live_header():
     avg_vol = info.get("averageVolume")
     vol_sub = f"{num(vol / avg_vol, 1)}× του μέσου όρου" if vol and avg_vol else ""
     isig = an.intraday_signals(regular if len(regular) >= 15 else intra)
+    intraday_score = an.score_signals(isig) if isig else None
     if isig:
-        s = an.score_signals(isig)
+        s = intraday_score
         day_html = (f'<div class="val" style="color:{score_color(s)}">{an.score_label(s)}</div>'
                     f'<div class="sub">{s:+.0f} / 100 · VWAP, EMA, RSI</div>')
     else:
@@ -393,6 +489,10 @@ def live_header():
         f'<div class="sub">Τελευταία συναλλαγή {upd:%H:%M} · έλεγχος {dt.datetime.now(ATHENS):%H:%M:%S}<br>'
         f'ώρα Ελλάδας · ανανέωση κάθε {refresh} δευτ.</div></div>'
         f'</div>', unsafe_allow_html=True)
+    current = snap["ext_price"] or price
+    p5 = probs[5]["p_up"] if 5 in probs else None
+    sig = an.trade_signal(ind, current, tech_score, p5, intraday_score)
+    st.markdown(signal_card(sig, current), unsafe_allow_html=True)
     if snap["stale_since"]:
         mins = max(1, int((time.time() - snap["stale_since"]) // 60))
         st.caption(f"Το Yahoo Finance δεν απάντησε στην τελευταία προσπάθεια. Δείχνω την τιμή από πριν από "
@@ -422,19 +522,6 @@ periodic_full_refresh()
 news_items, news_failed = safe("Ειδήσεις", data.news, ticker, company, default=([], ["Ειδήσεις"]))
 failed_sources.extend(news_failed)
 news = an.analyze_news(news_items)
-an_data = safe("Αναλυτές", data.analysts, ticker, default={}) or {}
-targets = an_data.get("targets") or {}
-calendar = an_data.get("calendar") or {}
-
-earnings_date = None
-ed = calendar.get("Earnings Date") if isinstance(calendar, dict) else None
-if ed:
-    first = ed[0] if isinstance(ed, (list, tuple)) else ed
-    try:
-        earnings_date = pd.Timestamp(first).date()
-    except Exception:
-        earnings_date = None
-
 # ---------------------------------------------------------------------------
 # Σύνοψη
 # ---------------------------------------------------------------------------

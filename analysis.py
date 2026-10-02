@@ -237,8 +237,11 @@ def pivot_points(df: pd.DataFrame) -> dict[str, float]:
     return {"S2": p - r, "S1": 2 * p - row["High"], "P": p, "R1": 2 * p - row["Low"], "R2": p + r}
 
 
-def swing_levels(df: pd.DataFrame, lookback=180, window=5, tol=0.015):
-    """Στηρίξεις/αντιστάσεις από πρόσφατα τοπικά ελάχιστα/μέγιστα, ομαδοποιημένα."""
+def swing_levels(df: pd.DataFrame, lookback=180, window=5, tol=0.015, price: float | None = None):
+    """Στηρίξεις/αντιστάσεις από πρόσφατα τοπικά ελάχιστα/μέγιστα, ομαδοποιημένα.
+
+    price: η τρέχουσα (live) τιμή· αν λείπει, το τελευταίο κλείσιμο.
+    """
     d = df.tail(lookback)
     if len(d) < 2 * window + 2:
         return [], []
@@ -257,7 +260,7 @@ def swing_levels(df: pd.DataFrame, lookback=180, window=5, tol=0.015):
         else:
             clusters.append([p])
     levels = [(float(np.mean(cl)), len(cl)) for cl in clusters]
-    price = float(d["Close"].iloc[-1])
+    price = float(d["Close"].iloc[-1]) if price is None else float(price)
     supports = sorted([lv for lv in levels if lv[0] < price], key=lambda x: -x[0])[:3]
     resistances = sorted([lv for lv in levels if lv[0] > price], key=lambda x: x[0])[:3]
     return supports, resistances
@@ -876,3 +879,126 @@ def analyze_news(items: list[dict], scorer: NewsScorer | None = None) -> dict:
         "neu": sum(e["label"] == "Ουδέτερη" for e in enriched),
         "topics": dict(sorted(counts.items(), key=lambda kv: -kv[1])),
     }
+
+
+# ---------------------------------------------------------------------------
+# Σήμα αγοράς / πώλησης με στόχο και σημείο ακύρωσης
+# ---------------------------------------------------------------------------
+
+SIGNAL_THRESHOLD = 25.0
+SIGNAL_TEXT = {"BUY": "ΑΓΟΡΑ (BUY)", "SELL": "ΠΩΛΗΣΗ (SELL)", "HOLD": "ΑΝΑΜΟΝΗ (HOLD)"}
+
+
+def signal_levels(action: str, price: float, atr_v: float, supports, resistances):
+    """Στόχος και σημείο ακύρωσης (stop) για ένα σήμα.
+
+    Στόχος: η πρώτη αντίσταση (για αγορά) ή στήριξη (για πώληση) σε απόσταση
+    τουλάχιστον 0,75 ATR· αλλιώς 2 ATR. Ακύρωση: λίγο πέρα από το πρώτο επίπεδο
+    στην αντίθετη πλευρά· αλλιώς 1,5 ATR. Όλα μέσα σε 4 ATR στόχο / 3 ATR ρίσκο.
+    """
+    sup = [lv for lv, _ in supports]
+    res = [lv for lv, _ in resistances]
+    gap = 0.75 * atr_v
+    if action == "BUY":
+        tgt = next((r for r in res if r >= price + gap), price + 2 * atr_v)
+        s = next((x for x in sup if x <= price - gap), None)
+        stop = s - 0.25 * atr_v if s is not None else price - 1.5 * atr_v
+        return min(tgt, price + 4 * atr_v), max(stop, price - 3 * atr_v)
+    tgt = next((x for x in sup if x <= price - gap), price - 2 * atr_v)
+    r = next((x for x in res if x >= price + gap), None)
+    stop = r + 0.25 * atr_v if r is not None else price + 1.5 * atr_v
+    return max(tgt, price - 4 * atr_v), min(stop, price + 3 * atr_v)
+
+
+def trade_signal(ind: pd.DataFrame, price: float, tech_score: float, p5: float | None,
+                 intraday_score: float | None = None) -> dict:
+    """Συνδυάζει τεχνική εικόνα (60%), πιθανότητα 5 ημερών (25%) και εικόνα ημέρας (15%)."""
+    last = ind.iloc[-1]
+    atr_v = float(last["ATR"]) if not pd.isna(last["ATR"]) else price * 0.02
+    prob_score = float(np.clip((p5 - 0.5) / 0.08, -1, 1) * 100) if p5 is not None else None
+    parts = [(tech_score, 0.6)]
+    if prob_score is not None:
+        parts.append((prob_score, 0.25))
+    if intraday_score is not None:
+        parts.append((intraday_score, 0.15))
+    composite = sum(v * w for v, w in parts) / sum(w for _, w in parts)
+
+    supports, resistances = swing_levels(ind, price=price)
+    if composite >= SIGNAL_THRESHOLD:
+        action = "BUY"
+    elif composite <= -SIGNAL_THRESHOLD:
+        action = "SELL"
+    else:
+        action = "HOLD"
+
+    out = {"action": action, "label": SIGNAL_TEXT[action], "composite": composite, "atr": atr_v,
+           "strength": "ισχυρό" if abs(composite) >= 50 else "μέτριο" if action != "HOLD" else ""}
+    if action == "HOLD":
+        # Επίπεδα σε απόσταση τουλάχιστον 0,3 ATR, ώστε να μην «πατιούνται» από τον θόρυβο.
+        out["up_trigger"] = next((r for r, _ in resistances if r >= price + 0.3 * atr_v), price + atr_v)
+        out["down_trigger"] = next((x for x, _ in supports if x <= price - 0.3 * atr_v), price - atr_v)
+    else:
+        tgt, stop = signal_levels(action, price, atr_v, supports, resistances)
+        out.update({"target": tgt, "stop": stop, "reward": abs(tgt / price - 1), "risk": abs(stop / price - 1)})
+
+    above200 = None if pd.isna(last["SMA200"]) else price > last["SMA200"]
+    out["against_trend"] = (action == "BUY" and above200 is False) or (action == "SELL" and above200 is True)
+
+    reasons = [f"Τεχνική εικόνα: {score_label(tech_score).lower()} ({tech_score:+.0f})"]
+    if p5 is not None:
+        reasons.append(f"Πιθανότητα ανόδου σε 5 συνεδριάσεις: {p5:.0%}")
+    if intraday_score is not None:
+        reasons.append(f"Εικόνα ημέρας: {score_label(intraday_score).lower()} ({intraday_score:+.0f})")
+    if above200 is not None:
+        reasons.append("Μακροπρόθεσμη τάση ανοδική (πάνω από τον μέσο 200 ημερών)" if above200 else
+                       "Μακροπρόθεσμη τάση πτωτική (κάτω από τον μέσο 200 ημερών)")
+    out["reasons"] = reasons
+    return out
+
+
+def backtest_signals(ind: pd.DataFrame, years: int = 3, horizon: int = 10) -> dict:
+    """Πόσο έπεφτε μέσα το τεχνικό σήμα τα τελευταία χρόνια.
+
+    Για κάθε μέρα με σήμα (μόνο από την τεχνική εικόνα, γιατί οι ιστορικές
+    πιθανότητες και η εικόνα ημέρας δεν υπάρχουν για το παρελθόν) ελέγχει
+    τις επόμενες `horizon` συνεδριάσεις: έφτασε πρώτα ο στόχος ή το stop;
+    Αν μια μέρα αγγίξει και τα δύο, μετράει ως stop (συντηρητικά).
+    """
+    n = len(ind)
+    start = max(260, n - 252 * years)
+    stats = {a: {"n": 0, "win": 0, "loss": 0, "rets": []} for a in ("BUY", "SELL")}
+    high, low, close = (ind[c].to_numpy(float) for c in ("High", "Low", "Close"))
+    for i in range(start, n - horizon):
+        window = ind.iloc[i - 259:i + 1]
+        score = score_signals(technical_signals(window))
+        if abs(score) < SIGNAL_THRESHOLD:
+            continue
+        action = "BUY" if score > 0 else "SELL"
+        price = close[i]
+        atr_v = window["ATR"].iloc[-1]
+        if pd.isna(atr_v) or atr_v <= 0:
+            continue
+        sup, res = swing_levels(window)
+        tgt, stop = signal_levels(action, price, atr_v, sup, res)
+        st = stats[action]
+        st["n"] += 1
+        sign = 1 if action == "BUY" else -1
+        for j in range(i + 1, i + 1 + horizon):
+            hit_stop = low[j] <= stop if action == "BUY" else high[j] >= stop
+            hit_tgt = high[j] >= tgt if action == "BUY" else low[j] <= tgt
+            if hit_stop:
+                st["loss"] += 1
+                break
+            if hit_tgt:
+                st["win"] += 1
+                break
+        st["rets"].append(sign * (close[i + horizon] / price - 1))
+    out = {}
+    for a, st in stats.items():
+        if st["n"]:
+            out[a] = {"n": st["n"], "win": st["win"] / st["n"], "loss": st["loss"] / st["n"],
+                      "open": 1 - (st["win"] + st["loss"]) / st["n"],
+                      "avg_ret": float(np.mean(st["rets"])), "hit": float(np.mean(np.array(st["rets"]) > 0))}
+    out["years"] = years
+    out["horizon"] = horizon
+    return out
