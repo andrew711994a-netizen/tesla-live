@@ -105,7 +105,12 @@ class Capital:
         return self.confirm(ref)
 
     def close(self, deal_id: str) -> dict:
-        ref = self._req("DELETE", f"/positions/{deal_id}").get("dealReference")
+        try:
+            ref = self._req("DELETE", f"/positions/{deal_id}").get("dealReference")
+        except CapitalError as e:
+            if " 404:" not in str(e) and " 405:" not in str(e):
+                raise
+            ref = self._req("DELETE", "/positions", json={"dealId": deal_id}).get("dealReference")
         return self.confirm(ref) if ref else {}
 
     def confirm(self, ref: str | None) -> dict:

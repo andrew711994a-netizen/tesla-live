@@ -223,7 +223,10 @@ def run() -> int:
         sg = sigs.get(sym)
         if sg is None:
             continue
-        created = pd.Timestamp(ps["created"]).tz_localize(None).normalize() if ps["created"] else today
+        created = today
+        if ps["created"]:
+            c = pd.Timestamp(ps["created"])
+            created = (c.tz_convert(None) if c.tzinfo is not None else c).normalize()
         held = int((bars[sym] > created).sum())
         reason = "Χρόνος" if held >= p.max_bars else ("Τάση" if p.trend_exit and bool(sg["trend_broken"]) else "")
         if not reason:
@@ -284,6 +287,7 @@ def run() -> int:
         risk_used = sum(abs(ps["level"] - float(ps["stop"] or ps["level"])) * ps["size"] for ps in still_open)
         notional_used = sum(ps["level"] * ps["size"] for ps in still_open)
         n_open = len(still_open)
+        available = acc["available"] * 0.98            # λίγο περιθώριο για spread και συναλλάγματα
         for _, sym, epic, sg in cands:
             if n_open >= rk["max_positions"]:
                 say(f"Παράλειψη {sym}: έχουμε ήδη {n_open} θέσεις (όριο {rk['max_positions']}).")
@@ -311,6 +315,7 @@ def run() -> int:
             qty = equity * rk["risk_per_trade"] / (dist * rate)
             qty = min(qty, max(0.0, rk["max_total_risk"] * equity - risk_used) / (dist * rate))
             qty = min(qty, max(0.0, rk["max_notional"] * equity - notional_used) / (price * rate))
+            qty = min(qty, max(0.0, available) / (price * rate))
             size = round_size(qty, m["size_step"], m["min_size"])
             if size <= 0:
                 say(f"Παράλειψη {sym}: πολύ μικρό μέγεθος για το ελάχιστο της Capital.com ({m['min_size']}).")
@@ -329,6 +334,7 @@ def run() -> int:
             n_open += 1
             risk_used += dist * size
             notional_used += price * size
+            available -= price * size * rate
 
     if not actions:
         say("Καμία κίνηση σήμερα.")
