@@ -38,12 +38,15 @@ JOURNAL = Path(__file__).resolve().parent.parent / "journal"
 # ── Ημερολόγιο (χωρίς ποσά: μόνο σύμβολα, τιμές και ποσοστά) ──
 def load_state() -> dict:
     f = JOURNAL / "positions.json"
-    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    data = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    if "positions" not in data:          # παλιά μορφή: σκέτο λεξικό θέσεων
+        data = {"positions": data, "peak_equity": None}
+    return data
 
 
-def save_state(state: dict) -> None:
+def save_state(data: dict) -> None:
     JOURNAL.mkdir(exist_ok=True)
-    (JOURNAL / "positions.json").write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+    (JOURNAL / "positions.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def append_csv(name: str, header: str, row: list) -> None:
@@ -189,7 +192,8 @@ def run() -> int:
     epic_to_sym = {v: k for k, v in universe.items()}
     actions: list[str] = []
     record = not dry                                    # το ημερολόγιο γράφει μόνο πραγματικές κινήσεις (demo ή live)
-    state = load_state() if record else {}
+    meta = load_state() if record else {"positions": {}, "peak_equity": None}
+    state = meta["positions"]
     live_epics = {ps["epic"] for ps in positions}
     for epic, entry in list(state.items()):
         if epic in live_epics:
@@ -254,10 +258,15 @@ def run() -> int:
                    f"Βάλ' την 1:{want} στις ρυθμίσεις της Capital.com.")
             say(msg)
             actions.append(msg)
-    if acc["deposit"] > 0 and equity < acc["deposit"] * (1 - rk["max_drawdown_stop"]):
+    # Φρένο: πτώση από το υψηλότερο σημείο του λογαριασμού αφότου ξεκίνησε το bot
+    peak = max(float(meta.get("peak_equity") or equity), equity)
+    meta["peak_equity"] = peak
+    if equity < peak * (1 - rk["max_drawdown_stop"]):
         allow_new = False
-        say(f"🛑 Ο λογαριασμός έπεσε πάνω από {rk['max_drawdown_stop']:.0%} από τις καταθέσεις. "
-            "Δεν ανοίγω νέες θέσεις μέχρι να το ελέγξεις.")
+        msg = (f"🛑 Ο λογαριασμός έπεσε {(1 - equity / peak) * 100:.0f}% από το υψηλότερο σημείο του "
+               f"(όριο {rk['max_drawdown_stop']:.0%}). Δεν ανοίγω νέες θέσεις μέχρι να το ελέγξεις.")
+        say(msg)
+        actions.append(msg)
     if rk.get("use_market_filter") and not market_is_ok:
         allow_new = False
         say("Φίλτρο αγοράς: ο Nasdaq-100 είναι κάτω από τον μέσο 200 ημερών. Χωρίς νέες αγορές σήμερα.")
@@ -324,7 +333,7 @@ def run() -> int:
     if not actions:
         say("Καμία κίνηση σήμερα.")
     if record:
-        save_state(state)
+        save_state(meta)
         open_now = ";".join(f"{epic_to_sym[ps['epic']]}:{((float(ps['bid'] or ps['level']) / ps['level']) - 1) * 100:+.1f}%"
                             for ps in still_open if ps["level"])
         append_csv("daily.csv", "date,env,equity_demo,open_positions,market_filter_ok,actions",
