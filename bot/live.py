@@ -189,6 +189,18 @@ def run() -> int:
         return 1
     equity = acc["equity"]
     say(f"Λογαριασμός {acc['currency']} · ανοιχτές θέσεις bot: {len(positions)}")
+    if env_flag("CHECK_EPICS", False):
+        # Διαγνωστικό (μόνο σε χειροκίνητη δοκιμή): υπάρχουν όλες οι μετοχές στην Capital.com;
+        bad = []
+        for sym, epic in universe.items():
+            try:
+                m = cap.market(epic)
+                if m["min_size"] <= 0:
+                    bad.append(f"{sym} (ελάχιστο μέγεθος {m['min_size']})")
+            except CapitalError as e:
+                bad.append(f"{sym} ({str(e)[:60]})")
+        say(f"Έλεγχος συμβόλων: {len(universe) - len(bad)}/{len(universe)} εντάξει" +
+            (f" · προβλήματα: {', '.join(bad)}" if bad else ""))
     epic_to_sym = {v: k for k, v in universe.items()}
     actions: list[str] = []
     record = not dry                                    # το ημερολόγιο γράφει μόνο πραγματικές κινήσεις (demo ή live)
