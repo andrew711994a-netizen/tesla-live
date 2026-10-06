@@ -223,6 +223,21 @@ def main() -> None:
         rows.append(("Σύγκριση: αγορά και κράτηση Nasdaq-100", bh, None))
         out += [f"### {period}", "", HEAD] + [line(n, st, r) for n, st, r in rows] + [""]
         summary[period] = {n: st for n, st, _ in rows}
+    # Από πού ήρθαν τα κέρδη της στρατηγικής 1 στα άγνωστα χρόνια (μήπως από 2–3 τυχερές μετοχές;)
+    start, end = PERIODS["2022–σήμερα (άγνωστα χρόνια)"]
+    res = run(stocks, p, Risk(rk["risk_per_trade"], rk["max_positions"], rk["max_total_risk"],
+                              rk["max_notional"], True), costs, start, end, market)
+    by = pd.Series({}, dtype=float)
+    if res["trades"]:
+        by = pd.DataFrame(res["trades"]).groupby("symbol")["pnl"].sum().sort_values(ascending=False)
+    total = by.sum()
+    out += ["### Στρατηγική 1, 2022–σήμερα: από ποιες μετοχές ήρθε το κέρδος", "",
+            f"Κερδοφόρες μετοχές: {(by > 0).sum()} από {len(by)} που έκαναν συναλλαγές. "
+            f"Οι 3 καλύτερες έδωσαν {by.head(3).sum() / total * 100:.0f}% του συνολικού κέρδους. "
+            f"Χωρίς τις 3 καλύτερες, το κέρδος θα ήταν {pct(by.iloc[3:].sum() / 10_000) if len(by) > 3 else '–'}.", "",
+            "| Μετοχή | Κέρδος ($) |", "|---|---|"]
+    out += [f"| {sym} | {v:+,.0f} |".replace(",", ".") for sym, v in list(by.head(8).items()) + list(by.tail(5).items())]
+    out.append("")
     path = ROOT / "reports"
     path.mkdir(exist_ok=True)
     (path / "research.md").write_text("\n".join(out), encoding="utf-8")
