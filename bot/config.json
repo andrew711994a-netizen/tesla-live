@@ -1,16 +1,34 @@
 {
   "universe": {
-    "NVDA": "NVDA", "AAPL": "AAPL", "AVGO": "AVGO", "TSLA": "TSLA", "JPM": "JPM",
-    "COST": "COST", "GOOGL": "GOOGL", "LLY": "LLY", "MSFT": "MSFT", "META": "META",
-    "V": "V", "AMZN": "AMZN", "XOM": "XOM", "^NDX": "US100"
+    "NVDA": "NVDA",
+    "AAPL": "AAPL",
+    "AVGO": "AVGO",
+    "TSLA": "TSLA",
+    "JPM": "JPM",
+    "COST": "COST",
+    "GOOGL": "GOOGL",
+    "LLY": "LLY",
+    "MSFT": "MSFT",
+    "META": "META",
+    "V": "V",
+    "AMZN": "AMZN",
+    "XOM": "XOM"
   },
   "market_symbol": "^NDX",
   "strategy": {
-    "ema_fast": 50, "ema_slow": 200,
-    "use_pullback": true, "rsi_len": 14, "rsi_level": 40,
-    "use_breakout": true, "brk_len": 20, "vol_mult": 1.2,
-    "atr_len": 14, "sl_atr": 2.0, "tp_atr": 3.0,
-    "max_bars": 20, "trend_exit": true
+    "ema_fast": 50,
+    "ema_slow": 200,
+    "use_pullback": true,
+    "rsi_len": 14,
+    "rsi_level": 40,
+    "use_breakout": true,
+    "brk_len": 20,
+    "vol_mult": 1.2,
+    "atr_len": 14,
+    "sl_atr": 2.0,
+    "tp_atr": 3.0,
+    "max_bars": 20,
+    "trend_exit": true
   },
   "risk": {
     "risk_per_trade": 0.01,
@@ -21,7 +39,14 @@
     "max_drawdown_stop": 0.15
   },
   "costs": {
-    "per_side": 0.001,
+    "per_side": 0.0007,
+    "financing_annual": 0.0
+  },
+  "leverage": {
+    "SHARES": 1
+  },
+  "costs_leveraged_cfd": {
+    "per_side": 0.0007,
     "financing_annual": 0.08
   }
 }

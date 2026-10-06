@@ -59,6 +59,16 @@ class Capital:
                 "deposit": float(b.get("deposit", 0)), "available": float(b.get("available", 0)),
                 "equity": float(b.get("balance", 0)) + float(b.get("profitLoss", 0))}
 
+    def leverage(self, asset: str = "SHARES") -> int | None:
+        prefs = self._req("GET", "/accounts/preferences")
+        lv = (prefs.get("leverages") or {}).get(asset)
+        if isinstance(lv, dict):
+            lv = lv.get("current")
+        return int(lv) if lv is not None else None
+
+    def set_leverage(self, asset: str, value: int) -> None:
+        self._req("PUT", "/accounts/preferences", json={"leverages": {asset: value}})
+
     # ── αγορές ──
     def market(self, epic: str) -> dict:
         m = self._req("GET", f"/markets/{epic}")

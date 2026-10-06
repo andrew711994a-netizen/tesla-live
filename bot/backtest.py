@@ -226,29 +226,29 @@ def main() -> None:
 
     rk = CONFIG["risk"]
     real_costs = Costs(**CONFIG["costs"])
-    variants = {
-        "Χαρτοφυλάκιο χωρίς φίλτρο αγοράς": Risk(rk["risk_per_trade"], rk["max_positions"], rk["max_total_risk"],
-                                                rk["max_notional"], False),
-        "Χαρτοφυλάκιο με φίλτρο αγοράς": Risk(rk["risk_per_trade"], rk["max_positions"], rk["max_total_risk"],
-                                              rk["max_notional"], True),
-    }
+    lev_costs = Costs(**CONFIG["costs_leveraged_cfd"])
+
+    def rcfg(filt: bool) -> Risk:
+        return Risk(rk["risk_per_trade"], rk["max_positions"], rk["max_total_risk"], rk["max_notional"], filt)
+
+    runs = [
+        ("Capital.com 1:1, με φίλτρο αγοράς", rcfg(True), real_costs),
+        ("Capital.com 1:1, χωρίς φίλτρο", rcfg(False), real_costs),
+        ("Σύγκριση: CFD με μόχλευση (χρέωση νύχτας 8%)", rcfg(True), lev_costs),
+    ]
 
     out = ["# Αποτελέσματα backtest", "",
            f"Δεδομένα έως {max(df.index[-1] for df in data.values()):%d/%m/%Y}. "
-           f"Αρχικό κεφάλαιο 10.000 $ σε κάθε έλεγχο.", "",
-           "## 1. Χαρτοφυλάκιο (όλες οι μετοχές μαζί, ρεαλιστικά κόστη)", "",
+           f"Αρχικό κεφάλαιο 10.000 $ σε κάθε έλεγχο. Μετοχές: {', '.join(symbols)}.", "",
+           "## 1. Χαρτοφυλάκιο (όλες οι μετοχές μαζί)", "",
            f"Ρίσκο {rk['risk_per_trade']:.0%} ανά συναλλαγή, έως {rk['max_positions']} θέσεις, "
-           f"συνολικό ρίσκο έως {rk['max_total_risk']:.0%}, χωρίς μόχλευση. Κόστος {real_costs.per_side:.1%} "
-           f"ανά πράξη και χρηματοδότηση CFD {real_costs.financing_annual:.0%} τον χρόνο.", ""]
+           f"συνολικό ρίσκο έως {rk['max_total_risk']:.0%}, σύνολο θέσεων έως το κεφάλαιο. "
+           f"Κόστος (spread) {real_costs.per_side:.2%} ανά πράξη.", ""]
     summary = {}
-    shares_costs = Costs(per_side=0.0005, financing_annual=0.0)
-    runs = [(n, r, real_costs) for n, r in variants.items()]
-    runs.append(("Με φίλτρο, πραγματικές μετοχές (χωρίς κόστος CFD)", variants["Χαρτοφυλάκιο με φίλτρο αγοράς"],
-                 shares_costs))
     for period, (start, end) in PERIODS.items():
         out += [f"### {period}", "", HEAD]
-        for name, rcfg, cst in runs:
-            st = stats(run(tradable, p, rcfg, cst, start, end, market))
+        for name, r, cst in runs:
+            st = stats(run(tradable, p, r, cst, start, end, market))
             summary[f"{period} | {name}"] = st
             out.append(row(name, st))
         bh = buy_hold(market, start, end)
