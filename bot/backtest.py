@@ -241,10 +241,14 @@ def main() -> None:
            f"συνολικό ρίσκο έως {rk['max_total_risk']:.0%}, χωρίς μόχλευση. Κόστος {real_costs.per_side:.1%} "
            f"ανά πράξη και χρηματοδότηση CFD {real_costs.financing_annual:.0%} τον χρόνο.", ""]
     summary = {}
+    shares_costs = Costs(per_side=0.0005, financing_annual=0.0)
+    runs = [(n, r, real_costs) for n, r in variants.items()]
+    runs.append(("Με φίλτρο, πραγματικές μετοχές (χωρίς κόστος CFD)", variants["Χαρτοφυλάκιο με φίλτρο αγοράς"],
+                 shares_costs))
     for period, (start, end) in PERIODS.items():
         out += [f"### {period}", "", HEAD]
-        for name, rcfg in variants.items():
-            st = stats(run(tradable, p, rcfg, real_costs, start, end, market))
+        for name, rcfg, cst in runs:
+            st = stats(run(tradable, p, rcfg, cst, start, end, market))
             summary[f"{period} | {name}"] = st
             out.append(row(name, st))
         bh = buy_hold(market, start, end)
