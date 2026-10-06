@@ -28,7 +28,8 @@ jobs:
       - name: Run backtest
         run: |
           python -m bot.backtest
-          cat reports/backtest.md >> "$GITHUB_STEP_SUMMARY"
+          python -m bot.backtest --tf 1h
+          cat reports/backtest.md reports/backtest_1h.md >> "$GITHUB_STEP_SUMMARY"
       - name: Save report
         run: |
           git config user.name "backtest-bot"

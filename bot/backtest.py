@@ -175,7 +175,7 @@ def stats(res: dict) -> dict:
     dd = (eq / eq.cummax() - 1).min()
     pnl = np.array([t["pnl"] for t in tr]) if tr else np.array([])
     wins, losses = pnl[pnl > 0].sum(), -pnl[pnl < 0].sum()
-    daily = eq.pct_change().dropna()
+    daily = eq.resample("D").last().dropna().pct_change().dropna()
     sharpe = daily.mean() / daily.std() * math.sqrt(252) if daily.std() > 0 else 0.0
     return {
         "total": total, "cagr": cagr, "max_dd": dd, "trades": len(tr),
@@ -275,5 +275,54 @@ def main() -> None:
     print("\n".join(out))
 
 
+def main_intraday(interval: str = "1h") -> None:
+    """Η ίδια στρατηγική σε ωριαία κεριά, συγκριτικά με την ημερήσια στο ίδιο διάστημα (~2 χρόνια)."""
+    from .data import intraday, load_all
+
+    p = Params.from_dict(CONFIG["strategy"])
+    symbols = list(CONFIG["universe"])
+    market_sym = CONFIG["market_symbol"]
+    data = {s: intraday(s, interval) for s in sorted(set(symbols + [market_sym]))}
+    daily_data = load_all(sorted(set(symbols + [market_sym])), start="2023-01-01")
+    rk = CONFIG["risk"]
+    risk = Risk(rk["risk_per_trade"], rk["max_positions"], rk["max_total_risk"], rk["max_notional"], True)
+    costs = Costs(**CONFIG["costs"])
+
+    first = max(df.index[0] for df in data.values())
+    start = (first + pd.Timedelta(days=60)).normalize()      # προθέρμανση για τον EMA 200 κεριών
+    split = start + (max(df.index[-1] for df in data.values()) - start) / 2
+    periods = {
+        f"Όλο το διάστημα ({start:%m/%Y}–σήμερα)": (start, None),
+        f"Πρώτο μισό ({start:%m/%Y}–{split:%m/%Y})": (start, split),
+        f"Δεύτερο μισό ({split:%m/%Y}–σήμερα)": (split, None),
+    }
+    out = [f"# Στρατηγική σε κεριά {interval} έναντι ημερήσιων", "",
+           f"Ίδιοι κανόνες και όρια ρίσκου, κόστος (spread) {costs.per_side:.2%} ανά πράξη, Capital.com 1:1. "
+           f"Τα ωριαία δεδομένα του Yahoo φτάνουν μόνο ~2 χρόνια πίσω, οπότε τα συμπεράσματα είναι πιο αβέβαια "
+           f"από το 10ετές τεστ.", ""]
+    summary = {}
+    for name, (st_, en_) in periods.items():
+        out += [f"### {name}", "", HEAD]
+        en_s = None if en_ is None else str(en_)
+        a = stats(run({s: data[s] for s in symbols}, p, risk, costs, str(st_), en_s, data[market_sym]))
+        b = stats(run({s: daily_data[s] for s in symbols}, p, risk, costs, str(st_.normalize()), en_s,
+                      daily_data[market_sym]))
+        c = buy_hold(daily_data[market_sym], str(st_.normalize()), en_s)
+        summary[name] = {interval: a, "1d": b, "buy_hold": c}
+        out += [row(f"Κεριά {interval}", a), row("Ημερήσια κεριά (το bot του demo)", b),
+                row("Αγορά και κράτηση Nasdaq-100", c), ""]
+    path = ROOT / "reports"
+    path.mkdir(exist_ok=True)
+    (path / f"backtest_{interval}.md").write_text("\n".join(out), encoding="utf-8")
+    (path / f"backtest_{interval}.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=float),
+                                                    encoding="utf-8")
+    print("\n".join(out))
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if len(sys.argv) > 2 and sys.argv[1] == "--tf":
+        main_intraday(sys.argv[2])
+    else:
+        main()
