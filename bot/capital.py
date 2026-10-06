@@ -49,15 +49,23 @@ class Capital:
 
     # ── λογαριασμός ──
     def account(self) -> dict:
+        """Ο λογαριασμός της τρέχουσας σύνδεσης, δηλαδή αυτός που δέχεται τις εντολές."""
         accs = self._req("GET", "/accounts").get("accounts", [])
-        pref = next((a for a in accs if a.get("preferred")), accs[0] if accs else None)
-        if not pref:
+        current = self._req("GET", "/session").get("accountId")
+        acc = (next((a for a in accs if a.get("accountId") == current), None)
+               or next((a for a in accs if a.get("preferred")), None)
+               or (accs[0] if accs else None))
+        if not acc:
             raise CapitalError("Δεν βρέθηκε λογαριασμός")
-        b = pref.get("balance", {})
-        return {"currency": pref.get("currency", "USD"),
-                "balance": float(b.get("balance", 0)), "pnl": float(b.get("profitLoss", 0)),
+        b = acc.get("balance", {})
+        balance = float(b.get("balance", 0))
+        # Στην Capital.com το «balance» περιλαμβάνει ήδη τα κέρδη/ζημιές των ανοιχτών θέσεων
+        # (balance = deposit + profitLoss), άρα αυτό είναι η αξία του λογαριασμού.
+        return {"currency": acc.get("currency", "USD"), "n_accounts": len(accs),
+                "is_current": acc.get("accountId") == current,
+                "balance": balance, "pnl": float(b.get("profitLoss", 0)),
                 "deposit": float(b.get("deposit", 0)), "available": float(b.get("available", 0)),
-                "equity": float(b.get("balance", 0)) + float(b.get("profitLoss", 0))}
+                "equity": balance}
 
     def leverage(self, asset: str = "SHARES") -> int | None:
         prefs = self._req("GET", "/accounts/preferences")

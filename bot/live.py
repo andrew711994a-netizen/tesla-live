@@ -189,6 +189,14 @@ def run() -> int:
         return 1
     equity = acc["equity"]
     say(f"Λογαριασμός {acc['currency']} · ανοιχτές θέσεις bot: {len(positions)}")
+    if env == "demo":   # εικονικά χρήματα: τα ποσά βοηθούν στον έλεγχο
+        say(f"Demo: υπόλοιπο {acc['balance']:.2f} · χωρίς ανοιχτά {acc['deposit']:.2f} · "
+            f"ανοιχτά κ/ζ {acc['pnl']:+.2f} · διαθέσιμα {acc['available']:.2f} · "
+            f"λογαριασμοί {acc['n_accounts']} · τρέχων: {'ναι' if acc['is_current'] else 'όχι'}")
+    if equity <= 0:
+        say("🛑 Η αξία του λογαριασμού φαίνεται μηδενική ή αρνητική. Δεν κάνω τίποτα, έλεγξε τον λογαριασμό.")
+        notify("Bot: πρόβλημα στον λογαριασμό", log[-1])
+        return 1
     if env_flag("CHECK_EPICS", False):
         # Διαγνωστικό (μόνο σε χειροκίνητη δοκιμή): υπάρχουν όλες οι μετοχές στην Capital.com;
         bad = []
