@@ -110,9 +110,9 @@ def main() -> int:
         acc = cap.account()
         positions = [ps for ps in cap.positions() if ps["epic"] in universe.values()]
     except KeyError as e:
-        say(f"Λείπει το secret {e}. Δες το bot/README.md.")
-        notify("Bot: λείπουν στοιχεία σύνδεσης", "\n".join(log))
-        return 1
+        # Δεν έχει στηθεί ακόμα: τερματισμός χωρίς σφάλμα, για να μη στέλνει το GitHub email αποτυχίας κάθε μέρα
+        say(f"Δεν έχει οριστεί το secret {e}. Δες το bot/README.md. Τίποτα να κάνω.")
+        return 0
     except CapitalError as e:
         say(f"Σφάλμα Capital.com: {e}")
         notify("Bot: σφάλμα σύνδεσης", "\n".join(log))
