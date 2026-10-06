@@ -1,0 +1,110 @@
+//@version=6
+// Στρατηγική τάσης: είσοδος σε υποχώρηση ή σε σπάσιμο, με stop/target από ATR
+// και σταθερό ρίσκο ανά συναλλαγή. Για ημερήσιο γράφημα (1D).
+// Οι ειδοποιήσεις στέλνουν JSON για τη γέφυρα προς την Capital.com.
+strategy("Trend Pullback / Breakout", overlay = true,
+     initial_capital = 10000, currency = currency.USD,
+     commission_type = strategy.commission.percent, commission_value = 0.05,
+     slippage = 2, pyramiding = 0)
+
+// ───────────── Ρυθμίσεις ─────────────
+grpT = "Τάση"
+emaFastLen = input.int(50, "EMA γρήγορος", minval = 5, group = grpT)
+emaSlowLen = input.int(200, "EMA αργός", minval = 20, group = grpT)
+
+grpE = "Είσοδος"
+usePullback = input.bool(true, "Είσοδος σε υποχώρηση (RSI γυρίζει πάνω)", group = grpE)
+rsiLen      = input.int(14, "Μήκος RSI", group = grpE)
+rsiLevel    = input.int(40, "RSI περνά πάνω από", minval = 10, maxval = 60, group = grpE)
+useBreakout = input.bool(true, "Είσοδος σε σπάσιμο υψηλού", group = grpE)
+brkLen      = input.int(20, "Υψηλό των τελευταίων Ν κεριών", minval = 5, group = grpE)
+volMult     = input.float(1.2, "Όγκος πάνω από × μέσου (για σπάσιμο)", minval = 0, step = 0.1, group = grpE)
+allowShort  = input.bool(false, "Επιτρέπονται short", group = grpE)
+
+grpR = "Ρίσκο"
+riskPct  = input.float(1.0, "Ρίσκο ανά συναλλαγή (% κεφαλαίου)", minval = 0.1, maxval = 3, step = 0.1, group = grpR)
+maxLev   = input.float(1.0, "Μέγιστη μόχλευση (1 = καθόλου)", minval = 0.1, maxval = 5, step = 0.1, group = grpR)
+atrLen   = input.int(14, "Μήκος ATR", group = grpR)
+slAtr    = input.float(2.0, "Stop-loss (× ATR)", minval = 0.5, step = 0.25, group = grpR)
+tpAtr    = input.float(3.0, "Take-profit (× ATR)", minval = 0.5, step = 0.25, group = grpR)
+maxBars  = input.int(20, "Κλείσιμο μετά από Ν κεριά", minval = 1, group = grpR)
+trendExit = input.bool(true, "Κλείσιμο αν σπάσει η μεγάλη τάση", group = grpR)
+
+grpD = "Περίοδος ελέγχου (για έλεγχο σε άγνωστα δεδομένα)"
+startT = input.time(timestamp(2016, 1, 1, 0, 0), "Από", group = grpD)
+endT   = input.time(timestamp(2099, 1, 1, 0, 0), "Έως", group = grpD)
+
+grpA = "Ειδοποιήσεις (webhook)"
+secret = input.string("ALLAKSE-ME", "Μυστικός κωδικός", group = grpA)
+
+// ───────────── Δείκτες ─────────────
+inRange = time >= startT and time <= endT
+emaF   = ta.ema(close, emaFastLen)
+emaS   = ta.ema(close, emaSlowLen)
+rsi    = ta.rsi(close, rsiLen)
+atr    = ta.atr(atrLen)
+volAvg = ta.sma(volume, 20)
+hh     = ta.highest(high, brkLen)[1]
+ll     = ta.lowest(low, brkLen)[1]
+
+upTrend   = close > emaS and emaF > emaS
+downTrend = close < emaS and emaF < emaS
+hasVol    = volAvg > 0                     // οι δείκτες (π.χ. US100) συχνά δεν έχουν όγκο
+volOk     = not hasVol or volume > volMult * volAvg
+
+pullLong  = usePullback and upTrend and ta.crossover(rsi, rsiLevel)
+brkLong   = useBreakout and upTrend and close > hh and volOk
+pullShort = usePullback and downTrend and ta.crossunder(rsi, 100 - rsiLevel)
+brkShort  = useBreakout and downTrend and close < ll and volOk
+
+flat      = strategy.position_size == 0
+longSig   = inRange and flat and (pullLong or brkLong)
+shortSig  = inRange and flat and allowShort and (pullShort or brkShort)
+
+// Μέγεθος: χάνεις riskPct% αν χτυπήσει το stop, χωρίς να ξεπερνάς τη μέγιστη μόχλευση
+stopDist = slAtr * atr
+qtyRisk  = stopDist > 0 ? strategy.equity * riskPct / 100 / stopDist : 0.0
+qtyCap   = strategy.equity * maxLev / close
+qty      = math.min(qtyRisk, qtyCap)
+
+f(x) => str.tostring(x, "#.####")
+msg(action, sl, tp) =>
+    '{"secret":"' + secret + '","symbol":"' + syminfo.ticker + '","action":"' + action +
+     '","price":' + f(close) + ',"stop":' + f(sl) + ',"tp":' + f(tp) +
+     ',"risk_pct":' + f(riskPct) + ',"max_lev":' + f(maxLev) + '}'
+
+// ───────────── Εντολές ─────────────
+var float slPrice = na
+var float tpPrice = na
+
+if longSig and qty > 0
+    slPrice := close - stopDist
+    tpPrice := close + tpAtr * atr
+    strategy.entry("L", strategy.long, qty = qty)
+    alert(msg("buy", slPrice, tpPrice), alert.freq_once_per_bar_close)
+
+if shortSig and qty > 0
+    slPrice := close + stopDist
+    tpPrice := close - tpAtr * atr
+    strategy.entry("S", strategy.short, qty = qty)
+    alert(msg("sell", slPrice, tpPrice), alert.freq_once_per_bar_close)
+
+strategy.exit("XL", "L", stop = slPrice, limit = tpPrice, comment_loss = "Stop", comment_profit = "Στόχος")
+strategy.exit("XS", "S", stop = slPrice, limit = tpPrice, comment_loss = "Stop", comment_profit = "Στόχος")
+
+// Χρονικό όριο και σπάσιμο τάσης: κλείσιμο στο κλείσιμο του κεριού
+barsIn   = strategy.opentrades > 0 ? bar_index - strategy.opentrades.entry_bar_index(0) : 0
+timeUp   = strategy.position_size != 0 and barsIn >= maxBars
+brokeUp  = trendExit and strategy.position_size > 0 and close < emaS
+brokeDn  = trendExit and strategy.position_size < 0 and close > emaS
+if timeUp or brokeUp or brokeDn
+    strategy.close_all(comment = timeUp ? "Χρόνος" : "Τάση")
+    alert('{"secret":"' + secret + '","symbol":"' + syminfo.ticker + '","action":"close"}', alert.freq_once_per_bar_close)
+
+// ───────────── Γράφημα ─────────────
+plot(emaF, "EMA γρήγορος", color = color.new(color.orange, 0), linewidth = 1)
+plot(emaS, "EMA αργός", color = color.new(color.purple, 0), linewidth = 2)
+plot(strategy.position_size != 0 ? slPrice : na, "Stop", color = color.red, style = plot.style_linebr)
+plot(strategy.position_size != 0 ? tpPrice : na, "Στόχος", color = color.green, style = plot.style_linebr)
+plotshape(longSig, "Αγορά", shape.triangleup, location.belowbar, color.green, size = size.small)
+plotshape(shortSig, "Πώληση", shape.triangledown, location.abovebar, color.red, size = size.small)
