@@ -146,22 +146,20 @@ def main() -> int:
 
     # 4) Όρια προστασίας
     allow_new = True
+    # Το bot ΔΕΝ αλλάζει ρυθμίσεις λογαριασμού: μόνο ελέγχει ότι η μόχλευση είναι 1:1
+    # (χωρίς 1:1 η Capital.com χρεώνει χρέωση νύχτας και η στρατηγική δεν βγαίνει).
     for asset, want in CONFIG.get("leverage", {}).items():
         try:
             cur = cap.leverage(asset)
-            if cur != want:
-                if dry:
-                    say(f"Μόχλευση {asset} είναι 1:{cur}. Σε κανονική λειτουργία θα την έκανα 1:{want}.")
-                else:
-                    cap.set_leverage(asset, want)
-                    cur = cap.leverage(asset)
-            if cur != want and not dry:
-                allow_new = False
-                say(f"🛑 Δεν μπόρεσα να ορίσω μόχλευση 1:{want} για {asset} (είναι 1:{cur}). "
-                    "Χωρίς 1:1 υπάρχει χρέωση νύχτας, οπότε δεν ανοίγω νέες θέσεις.")
         except CapitalError as e:
-            allow_new = allow_new and dry
-            say(f"⚠️ Έλεγχος μόχλευσης απέτυχε: {e}")
+            cur = None
+            say(f"⚠️ Δεν μπόρεσα να διαβάσω τη μόχλευση {asset}: {e}")
+        if cur != want:
+            allow_new = False
+            msg = (f"🛑 Η μόχλευση για {asset} είναι 1:{cur}, όχι 1:{want}. Δεν ανοίγω νέες θέσεις. "
+                   f"Βάλ' την 1:{want} στις ρυθμίσεις της Capital.com.")
+            say(msg)
+            actions.append(msg)
     if acc["deposit"] > 0 and equity < acc["deposit"] * (1 - rk["max_drawdown_stop"]):
         allow_new = False
         say(f"🛑 Ο λογαριασμός έπεσε πάνω από {rk['max_drawdown_stop']:.0%} από τις καταθέσεις. "

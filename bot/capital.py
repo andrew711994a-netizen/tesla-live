@@ -66,9 +66,6 @@ class Capital:
             lv = lv.get("current")
         return int(lv) if lv is not None else None
 
-    def set_leverage(self, asset: str, value: int) -> None:
-        self._req("PUT", "/accounts/preferences", json={"leverages": {asset: value}})
-
     # ── αγορές ──
     def market(self, epic: str) -> dict:
         m = self._req("GET", f"/markets/{epic}")
