@@ -161,6 +161,16 @@ def run() -> int:
         say("Χωρίς δεδομένα αγοράς, δεν ανοίγω νέες θέσεις σήμερα.")
 
     # 2) Σύνδεση με την Capital.com
+    names = ["CAPITAL_API_KEY", "CAPITAL_IDENTIFIER", "CAPITAL_PASSWORD"]
+    missing = [n for n in names if not os.environ.get(n, "").strip()]
+    if len(missing) == len(names):
+        say("Δεν έχουν οριστεί τα στοιχεία σύνδεσης (GitHub Secrets). Δες το bot/README.md. Τίποτα να κάνω.")
+        return 0
+    if missing:
+        say(f"🛑 Λείπει ή είναι κενό το secret: {', '.join(missing)}. "
+            "GitHub → Settings → Secrets and variables → Actions: έλεγξε ότι το όνομα είναι γραμμένο ακριβώς έτσι.")
+        notify("Bot: λείπει στοιχείο σύνδεσης", log[-1])
+        return 1
     try:
         cap = Capital(os.environ["CAPITAL_API_KEY"], os.environ["CAPITAL_IDENTIFIER"],
                       os.environ["CAPITAL_PASSWORD"], env)
