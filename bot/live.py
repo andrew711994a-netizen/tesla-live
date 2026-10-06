@@ -85,8 +85,33 @@ def round_size(qty: float, step: float, min_size: float) -> float:
     return size if size >= min_size else 0.0
 
 
+LOG: list[str] = []
+
+
+def write_run_log(status: str) -> None:
+    """Σύντομο σημείωμα της τελευταίας εκτέλεσης (χωρίς ποσά ή κλειδιά), για τον καθημερινό έλεγχο."""
+    JOURNAL.mkdir(exist_ok=True)
+    stamp = datetime.now(NY).strftime("%Y-%m-%d %H:%M")
+    (JOURNAL / "last_run.md").write_text(f"# Τελευταία εκτέλεση {stamp} (Νέα Υόρκη) · {status}\n\n" +
+                                         "\n".join(f"- {line}" for line in LOG) + "\n", encoding="utf-8")
+
+
 def main() -> int:
-    log: list[str] = []
+    try:
+        code = run()
+    except Exception as e:  # απρόβλεπτο σφάλμα: καταγραφή και ειδοποίηση
+        import traceback
+        LOG.append(f"ΣΦΑΛΜΑ: {type(e).__name__}: {e}")
+        LOG.extend(line.strip() for line in traceback.format_exc().strip().splitlines()[-3:-1])
+        print("\n".join(LOG))
+        notify("Bot: απρόβλεπτο σφάλμα", "\n".join(LOG[-5:]))
+        code = 1
+    write_run_log("OK" if code == 0 else "ΣΦΑΛΜΑ")
+    return code
+
+
+def run() -> int:
+    log = LOG
 
     def say(msg: str):
         print(msg)
