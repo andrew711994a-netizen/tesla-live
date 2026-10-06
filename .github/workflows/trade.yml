@@ -14,7 +14,7 @@ on:
         default: true
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: trade
@@ -43,3 +43,13 @@ jobs:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || vars.DRY_RUN || 'true' }}
           FORCE: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
         run: python -m bot.live
+      - name: Save journal
+        if: always()
+        run: |
+          [ -d journal ] || exit 0
+          git config user.name "trading-bot"
+          git config user.email "trading-bot@users.noreply.github.com"
+          git add journal/
+          git diff --cached --quiet && exit 0
+          git commit -m "Journal $(date -u +%F) [skip ci]"
+          for i in 1 2 3; do git pull --rebase origin main && git push origin HEAD:main && break; sleep 5; done

@@ -32,6 +32,36 @@ from .strategy import Params, market_ok, signals
 
 NY = ZoneInfo("America/New_York")
 CONFIG = json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8"))
+JOURNAL = Path(__file__).resolve().parent.parent / "journal"
+
+
+# ── Ημερολόγιο (χωρίς ποσά: μόνο σύμβολα, τιμές και ποσοστά) ──
+def load_state() -> dict:
+    f = JOURNAL / "positions.json"
+    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+
+
+def save_state(state: dict) -> None:
+    JOURNAL.mkdir(exist_ok=True)
+    (JOURNAL / "positions.json").write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def append_csv(name: str, header: str, row: list) -> None:
+    JOURNAL.mkdir(exist_ok=True)
+    f = JOURNAL / name
+    new = not f.exists()
+    with f.open("a", encoding="utf-8") as fh:
+        if new:
+            fh.write(header + "\n")
+        fh.write(",".join(str(x).replace(",", ";") for x in row) + "\n")
+
+
+def log_trade(entry: dict, exit_date, exit_px: float, reason: str, env: str) -> None:
+    res = exit_px / entry["entry"] - 1
+    r = (exit_px - entry["entry"]) / max(entry["entry"] - entry["stop"], 1e-9)
+    append_csv("trades.csv", "open_date,close_date,symbol,entry,exit,result_pct,r_multiple,reason,env",
+               [entry["date"], exit_date, entry["symbol"], f"{entry['entry']:.2f}", f"{exit_px:.2f}",
+                f"{res * 100:+.2f}", f"{r:+.2f}", reason, env])
 
 
 def env_flag(name: str, default: bool) -> bool:
@@ -88,6 +118,7 @@ def main() -> int:
     start = (today - pd.Timedelta(days=500)).strftime("%Y-%m-%d")
     sigs: dict[str, pd.Series] = {}
     bars: dict[str, pd.DatetimeIndex] = {}
+    frames: dict[str, pd.DataFrame] = {}
     market_is_ok = False
     for sym in set(universe) | {CONFIG["market_symbol"]}:
         try:
@@ -96,6 +127,7 @@ def main() -> int:
             sg = signals(df, p)
             sigs[sym] = sg.iloc[-1]
             bars[sym] = df.index                           # για μέτρηση ημερών σε θέση
+            frames[sym] = df
             if sym == CONFIG["market_symbol"]:
                 market_is_ok = bool(market_ok(df, p).iloc[-1])
         except Exception as e:
@@ -121,6 +153,30 @@ def main() -> int:
     say(f"Λογαριασμός {acc['currency']} · ανοιχτές θέσεις bot: {len(positions)}")
     epic_to_sym = {v: k for k, v in universe.items()}
     actions: list[str] = []
+    record = not dry                                    # το ημερολόγιο γράφει μόνο πραγματικές κινήσεις (demo ή live)
+    state = load_state() if record else {}
+    live_epics = {ps["epic"] for ps in positions}
+    for epic, entry in list(state.items()):
+        if epic in live_epics:
+            continue
+        # Έκλεισε στην Capital.com από stop ή στόχο: εκτίμηση από τα ημερήσια κεριά
+        df = frames.get(entry["symbol"])
+        px, why = entry["entry"], "Άγνωστο"
+        if df is not None:
+            after = df[df.index >= pd.Timestamp(entry["date"])]
+            hit_stop = after[after["Low"] <= entry["stop"]]
+            hit_tp = after[after["High"] >= entry["tp"]]
+            first_stop = hit_stop.index[0] if len(hit_stop) else None
+            first_tp = hit_tp.index[0] if len(hit_tp) else None
+            if first_stop is not None and (first_tp is None or first_stop <= first_tp):
+                px, why = entry["stop"], "Stop"
+            elif first_tp is not None:
+                px, why = entry["tp"], "Στόχος"
+            elif len(after):
+                px, why = float(after["Close"].iloc[-1]), "Άγνωστο (εκτίμηση)"
+        log_trade(entry, today.date(), px, why, env)
+        say(f"Έκλεισε στην Capital.com: {entry['symbol']} · {why} · {(px / entry['entry'] - 1) * 100:+.1f}%")
+        state.pop(epic)
 
     # 3) Έξοδοι λόγω χρόνου ή σπασμένης τάσης (stop και στόχος είναι ήδη στην Capital.com)
     for ps in positions:
@@ -136,7 +192,10 @@ def main() -> int:
         msg = f"ΚΛΕΙΣΙΜΟ {sym} ({ps['size']}) · λόγος: {reason}, {held} μέρες σε θέση"
         if not dry:
             try:
-                cap.close(ps["deal_id"])
+                conf = cap.close(ps["deal_id"])
+                exit_px = float(conf.get("level") or ps.get("bid") or sg["close"])
+                if ps["epic"] in state:
+                    log_trade(state.pop(ps["epic"]), today.date(), exit_px, reason, env)
             except CapitalError as e:
                 msg += f" · ΑΠΕΤΥΧΕ: {e}"
         actions.append(msg)
@@ -216,7 +275,9 @@ def main() -> int:
                    f"({(stop / price - 1) * 100:+.1f}%) · στόχος {tp:.2f} ({(tp / price - 1) * 100:+.1f}%) · {sg['kind']}")
             if not dry:
                 try:
-                    cap.open(epic, size, stop, tp)
+                    conf = cap.open(epic, size, stop, tp)
+                    state[epic] = {"symbol": sym, "date": str(today.date()), "entry": float(conf.get("level") or price),
+                                   "stop": stop, "tp": tp, "kind": sg["kind"]}
                 except CapitalError as e:
                     msg += f" · ΑΠΕΤΥΧΕ: {e}"
             actions.append(msg)
@@ -227,6 +288,13 @@ def main() -> int:
 
     if not actions:
         say("Καμία κίνηση σήμερα.")
+    if record:
+        save_state(state)
+        open_now = ";".join(f"{epic_to_sym[ps['epic']]}:{((float(ps['bid'] or ps['level']) / ps['level']) - 1) * 100:+.1f}%"
+                            for ps in still_open if ps["level"])
+        append_csv("daily.csv", "date,env,equity_demo,open_positions,market_filter_ok,actions",
+                   [today.date(), env, f"{equity:.2f}" if env == "demo" else "", open_now or "-",
+                    market_is_ok, " | ".join(actions) or "-"])
     title = f"Bot {env}{' (δοκιμή)' if dry else ''}: " + (f"{len(actions)} κινήσεις" if actions else "καμία κίνηση")
     notify(title, "\n".join(actions) if actions else "Δεν υπήρξαν σήματα σήμερα.")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
