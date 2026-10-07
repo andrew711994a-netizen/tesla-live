@@ -1,10 +1,11 @@
 name: Trade
 
-# Το GitHub συχνά ξεκινά τις προγραμματισμένες εκτελέσεις με καθυστέρηση (ή τις παραλείπει). Γι' αυτό:
-# - ξεκινά ~9:05 και 9:15 Νέα Υόρκη, κατεβάζει τα δεδομένα και ΠΕΡΙΜΕΝΕΙ ως τις 9:31 για τις εντολές,
-# - από τις 9:35 ως τις ~10:50 ξαναδοκιμάζει κάθε 15 λεπτά (εφεδρεία).
-# Οι ώρες UTC καλύπτουν θερινή και χειμερινή ώρα· το πρόγραμμα ελέγχει μόνο του την ώρα και κάνει
-# συναλλαγές μία φορά τη μέρα (οι επόμενες εκτελέσεις τελειώνουν αμέσως, εκτός αν η πρώτη απέτυχε).
+# Το bot ξεκινά ~9:05–9:25 Νέα Υόρκη, κατεβάζει τα δεδομένα και ΠΕΡΙΜΕΝΕΙ ως τις 9:31 για τις εντολές.
+# Κύρια εκκίνηση: εξωτερική κλήση workflow_dispatch με auto=true (καθημερινή υπενθύμιση του Claude), γιατί
+# ο προγραμματισμός του GitHub δεν είναι αξιόπιστος (αργεί ή παραλείπει εκτελέσεις). Τα cron μένουν ως εφεδρεία:
+# ~9:05/9:15 και μετά κάθε 15 λεπτά ως τις ~10:50 (οι ώρες UTC καλύπτουν θερινή και χειμερινή ώρα).
+# Το πρόγραμμα ελέγχει μόνο του την ώρα και κάνει συναλλαγές μία φορά τη μέρα (οι επόμενες εκτελέσεις
+# τελειώνουν αμέσως, εκτός αν η πρώτη απέτυχε).
 on:
   schedule:
     - cron: "5,15,35,50 13 * * 1-5"
@@ -13,9 +14,13 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Μόνο δοκιμή, χωρίς εντολές"
+        description: "Μόνο δοκιμή, χωρίς εντολές (αγνοείται με το «Όπως το πρόγραμμα»)"
         type: boolean
         default: true
+      auto:
+        description: "Όπως το πρόγραμμα: ίδιοι έλεγχοι ώρας/αργίας, μία φορά τη μέρα, DRY_RUN από τις Variables"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -46,9 +51,10 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           CAPITAL_ENV: ${{ vars.CAPITAL_ENV || 'demo' }}
           BOT_ENABLED: ${{ vars.BOT_ENABLED || 'true' }}
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || vars.DRY_RUN || 'true' }}
-          FORCE: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
-          CHECK_EPICS: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+          # Χειροκίνητη εκτέλεση (όχι «Όπως το πρόγραμμα»): αγνοεί ώρα/αργία/μία φορά τη μέρα και ελέγχει τα σύμβολα
+          DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && !inputs.auto) && inputs.dry_run || vars.DRY_RUN || 'true' }}
+          FORCE: ${{ (github.event_name == 'workflow_dispatch' && !inputs.auto) && 'true' || 'false' }}
+          CHECK_EPICS: ${{ (github.event_name == 'workflow_dispatch' && !inputs.auto) && 'true' || 'false' }}
         run: python -m bot.live
       - name: Save journal
         if: always()
