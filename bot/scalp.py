@@ -55,17 +55,22 @@ def parse(rows: list[dict]) -> pd.DataFrame:
 
 
 def download(cap: Capital, epic: str, days: int = DAYS) -> pd.DataFrame:
-    end = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    t = end - timedelta(days=days)
+    """Ένα αίτημα ανά εργάσιμη: 13:25–21:05 UTC καλύπτει τις ώρες της Νέας Υόρκης με θερινή και χειμερινή ώρα."""
+    today = datetime.now(timezone.utc).date()
     rows: list[dict] = []
     fmt = "%Y-%m-%dT%H:%M:%S"
-    while t < end:
-        t2 = min(t + timedelta(minutes=999), end)
+    for k in range(days, -1, -1):
+        d = today - timedelta(days=k)
+        if d.weekday() >= 5:
+            continue
+        a = datetime(d.year, d.month, d.day, 13, 25, tzinfo=timezone.utc)
+        b = min(a + timedelta(minutes=460), datetime.now(timezone.utc).replace(second=0, microsecond=0))
+        if b <= a:
+            continue
         try:
-            rows += cap.prices(epic, "MINUTE", t.strftime(fmt), t2.strftime(fmt))
+            rows += cap.prices(epic, "MINUTE", a.strftime(fmt), b.strftime(fmt))
         except CapitalError:
-            pass  # χωρίς δεδομένα σε αυτό το διάστημα (Σαββατοκύριακο ή πιο παλιά από όσο κρατά η Capital.com)
-        t = t2
+            pass  # αργία ή πιο παλιά από όσο κρατά η Capital.com
     return parse(rows)
 
 
@@ -287,9 +292,33 @@ def strat_vwap_25(day, **kw):
     return _vwap_revert(day, 2.5, **kw)
 
 
-STRATS = {"ORB 5′ (Zarattini)": strat_orb5, "ORB 15′ σπάσιμο": strat_orb15,
-          "EMA 9/21 + VWAP": strat_ema_9_21, "EMA 5/13 + VWAP": strat_ema_5_13,
-          "VWAP επιστροφή 2σ": strat_vwap_2, "VWAP επιστροφή 2,5σ": strat_vwap_25}
+ALL_STRATS = {"orb5": ("ORB 5′ (Zarattini)", strat_orb5), "orb15": ("ORB 15′ σπάσιμο", strat_orb15),
+              "ema921": ("EMA 9/21 + VWAP", strat_ema_9_21), "ema513": ("EMA 5/13 + VWAP", strat_ema_5_13),
+              "vwap2": ("VWAP επιστροφή 2σ", strat_vwap_2), "vwap25": ("VWAP επιστροφή 2,5σ", strat_vwap_25)}
+STRATS = {name: fn for name, fn in ALL_STRATS.values()}
+
+
+def configure() -> str:
+    """SCALP_DAYS, SCALP_INSTRUMENTS (π.χ. US100,US500), SCALP_STRATS (π.χ. orb5,orb15), SCALP_OUT (όνομα αναφοράς)."""
+    global DAYS, INSTRUMENTS, STRATS
+    days = os.environ.get("SCALP_DAYS", "").strip()
+    if days:
+        DAYS = max(5, min(int(days), 1500))
+    inst = [x.strip().upper() for x in os.environ.get("SCALP_INSTRUMENTS", "").split(",") if x.strip()]
+    if inst:
+        if not all(x.isalnum() and len(x) <= 12 for x in inst):
+            raise ValueError(f"Άκυρα σύμβολα: {inst}")
+        INSTRUMENTS = {x: INSTRUMENTS.get(x, x) for x in inst}
+    keys = [x.strip().lower() for x in os.environ.get("SCALP_STRATS", "").split(",") if x.strip()]
+    if keys:
+        unknown = [k for k in keys if k not in ALL_STRATS]
+        if unknown:
+            raise ValueError(f"Άγνωστες τεχνικές: {unknown}")
+        STRATS = {ALL_STRATS[k][0]: ALL_STRATS[k][1] for k in keys}
+    out = os.environ.get("SCALP_OUT", "").strip() or "scalp"
+    if not out.replace("_", "").isalnum():
+        raise ValueError(f"Άκυρο όνομα αναφοράς: {out}")
+    return out
 
 
 # ───────────── Στατιστικά και κρίση ─────────────
@@ -369,9 +398,10 @@ def evaluate(df: pd.DataFrame) -> dict:
 
 
 def main() -> None:
+    report = configure()
     env = os.environ.get("CAPITAL_ENV", "demo")
     cap = Capital(os.environ["CAPITAL_API_KEY"], os.environ["CAPITAL_IDENTIFIER"], os.environ["CAPITAL_PASSWORD"], env)
-    out = ["# Έρευνα: scalping και γρήγορες ενδοσυνεδριακές συναλλαγές", "",
+    out = [f"# Έρευνα: scalping και γρήγορες ενδοσυνεδριακές συναλλαγές ({DAYS} ημέρες ιστορικού)", "",
            "Πραγματικά κεριά 1 λεπτού της Capital.com με bid/ask: κάθε αγορά στο ask, κάθε πώληση στο bid, άρα το "
            "spread είναι μέσα στο αποτέλεσμα. Μόνο κανονικές ώρες Νέας Υόρκης (9:30–16:00), καμία θέση το βράδυ. "
            "Αν stop και στόχος πιάνονται στο ίδιο λεπτό, μετράει το stop (συντηρητικά).", "",
@@ -385,7 +415,7 @@ def main() -> None:
     passes: dict[str, list[str]] = {name: [] for name in STRATS}
     for epic, label in INSTRUMENTS.items():
         try:
-            df = regular_hours(download(cap, epic))
+            df = regular_hours(download(cap, epic, DAYS))
         except Exception as e:  # πρόβλημα με ένα σύμβολο δεν σταματά την έρευνα
             out += [f"### {label} ({epic})", "", f"Χωρίς δεδομένα: {e}", ""]
             continue
@@ -418,8 +448,8 @@ def main() -> None:
     out.append("")
     path = ROOT / "reports"
     path.mkdir(exist_ok=True)
-    (path / "scalp.md").write_text("\n".join(out), encoding="utf-8")
-    (path / "scalp.json").write_text(json.dumps({"summary": summary, "passes": passes}, ensure_ascii=False,
+    (path / f"{report}.md").write_text("\n".join(out), encoding="utf-8")
+    (path / f"{report}.json").write_text(json.dumps({"summary": summary, "passes": passes}, ensure_ascii=False,
                                                 indent=1, default=float), encoding="utf-8")
     print("\n".join(out))
 

@@ -4,6 +4,23 @@ name: Scalp research
 # Μόνο ανάγνωση τιμών: δεν ανοίγει θέσεις. Τρέχει μόνο χειροκίνητα.
 on:
   workflow_dispatch:
+    inputs:
+      days:
+        description: "Ημέρες ιστορικού (κενό = 120)"
+        type: string
+        default: ""
+      instruments:
+        description: "Σύμβολα χωρισμένα με κόμμα (κενό = όλα), π.χ. US100,US500,TSLA"
+        type: string
+        default: ""
+      strategies:
+        description: "Τεχνικές (κενό = όλες): orb5,orb15,ema921,ema513,vwap2,vwap25"
+        type: string
+        default: ""
+      out:
+        description: "Όνομα αναφοράς στο reports/ (κενό = scalp)"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -30,9 +47,13 @@ jobs:
           CAPITAL_IDENTIFIER: ${{ secrets.CAPITAL_IDENTIFIER }}
           CAPITAL_PASSWORD: ${{ secrets.CAPITAL_PASSWORD }}
           CAPITAL_ENV: demo
+          SCALP_DAYS: ${{ inputs.days }}
+          SCALP_INSTRUMENTS: ${{ inputs.instruments }}
+          SCALP_STRATS: ${{ inputs.strategies }}
+          SCALP_OUT: ${{ inputs.out }}
         run: |
           python -m bot.scalp
-          cat reports/scalp.md >> "$GITHUB_STEP_SUMMARY"
+          cat "reports/${SCALP_OUT:-scalp}.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Save report
         run: |
           git config user.name "backtest-bot"
