@@ -94,6 +94,11 @@ class Capital:
     def search(self, term: str) -> list[dict]:
         return self._req("GET", "/markets", params={"searchTerm": term}).get("markets", [])
 
+    def prices(self, epic: str, resolution: str, start: str, end: str, max_n: int = 1000) -> list[dict]:
+        """Ιστορικά κεριά με bid/ask (MINUTE, MINUTE_5, …). Ημερομηνίες UTC, μορφή YYYY-MM-DDTHH:MM:SS."""
+        return self._req("GET", f"/prices/{epic}", params={"resolution": resolution, "max": max_n,
+                                                           "from": start, "to": end}).get("prices", [])
+
     # ── θέσεις ──
     def positions(self) -> list[dict]:
         out = []
