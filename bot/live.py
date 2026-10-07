@@ -56,9 +56,12 @@ def market_holiday(day: pd.Timestamp) -> bool:
 
 
 # ── Ημερολόγιο (χωρίς ποσά: μόνο σύμβολα, τιμές και ποσοστά) ──
+def load_json(f: Path) -> dict:
+    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+
+
 def load_state() -> dict:
-    f = JOURNAL / "positions.json"
-    data = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    data = load_json(JOURNAL / "positions.json")
     if "positions" not in data:          # παλιά μορφή: σκέτο λεξικό θέσεων
         data = {"positions": data, "peak_equity": None}
     return data
@@ -111,14 +114,22 @@ def round_size(qty: float, step: float, min_size: float) -> float:
 LOG: list[str] = []
 SKIP = -1  # εκτός ωραρίου ή έτρεξε ήδη σήμερα: το σημείωμα της κανονικής εκτέλεσης μένει ως έχει
 MIN_POSITION = 0.02  # όπως το backtest: καμία θέση κάτω από το 2% του λογαριασμού
+TRADE_AT = (9, 31)   # αγορές/κλεισίματα 1 λεπτό μετά το άνοιγμα της Νέας Υόρκης (≈ τιμή ανοίγματος, όπως το backtest)
+MAX_WAIT_MIN = 35    # το GitHub ξεκινά νωρίτερα και το bot περιμένει, γιατί οι προγραμματισμένες εκτελέσεις αργούν
+DRY_MARK = "dry_run.json"
 
 
 def write_run_log(status: str) -> None:
-    """Σύντομο σημείωμα της τελευταίας εκτέλεσης (χωρίς ποσά ή κλειδιά), για τον καθημερινό έλεγχο."""
+    """Σύντομο σημείωμα της τελευταίας εκτέλεσης (χωρίς ποσά ή κλειδιά), για τον καθημερινό έλεγχο.
+
+    Οι δοκιμές γράφουν σε χωριστό αρχείο, για να μη σβήνουν το σημείωμα της πραγματικής εκτέλεσης.
+    """
     JOURNAL.mkdir(exist_ok=True)
     stamp = datetime.now(NY).strftime("%Y-%m-%d %H:%M")
-    (JOURNAL / "last_run.md").write_text(f"# Τελευταία εκτέλεση {stamp} (Νέα Υόρκη) · {status}\n\n" +
-                                         "\n".join(f"- {line}" for line in LOG) + "\n", encoding="utf-8")
+    dry = env_flag("DRY_RUN", True)
+    name, kind = ("last_dry_run.md", "δοκιμή") if dry else ("last_run.md", "εκτέλεση")
+    (JOURNAL / name).write_text(f"# Τελευταία {kind} {stamp} (Νέα Υόρκη) · {status}\n\n" +
+                                "\n".join(f"- {line}" for line in LOG) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -153,17 +164,20 @@ def run() -> int:
         say("Άρνηση: ο live λογαριασμός χρειάζεται ALLOW_LIVE=I_UNDERSTAND_THE_RISK.")
         return 1
     dry = env_flag("DRY_RUN", True)
+    force = env_flag("FORCE", False)
     now = datetime.now(NY)
-    if not env_flag("FORCE", False):
-        if now.weekday() >= 5 or not ((now.hour, now.minute) >= (9, 35) and now.hour < 11):
+    trade_at = now.replace(hour=TRADE_AT[0], minute=TRADE_AT[1], second=0, microsecond=0)
+    if not force:
+        if now.weekday() >= 5 or (trade_at - now).total_seconds() > MAX_WAIT_MIN * 60 or now.hour >= 11:
             print(f"Εκτός παραθύρου εκτέλεσης ({now:%a %H:%M} Νέα Υόρκη). Τίποτα να κάνω.")
             return SKIP
         if market_holiday(pd.Timestamp(now.date())):
             print("Αργία στο χρηματιστήριο της Νέας Υόρκης σήμερα. Τίποτα να κάνω.")
             return SKIP
-        if not dry and load_state().get("last_run") == str(now.date()):
-            # Με τη θερινή ώρα και τα δύο cron πέφτουν μέσα στο παράθυρο: τρέχουμε μία φορά τη μέρα.
-            # Αν η πρώτη εκτέλεση απέτυχε, η δεύτερη λειτουργεί ως επανάληψη.
+        mark = load_json(JOURNAL / DRY_MARK) if dry else load_state()
+        if mark.get("last_run") == str(now.date()):
+            # Προγραμματισμένες εκτελέσεις κάθε 15 λεπτά: συναλλαγές μία φορά τη μέρα.
+            # Αν η πρώτη απέτυχε, η επόμενη λειτουργεί ως επανάληψη.
             print("Το bot έτρεξε ήδη σήμερα. Τίποτα να κάνω.")
             return SKIP
 
@@ -210,6 +224,12 @@ def run() -> int:
         say("Χωρίς δεδομένα αγοράς, δεν ανοίγω νέες θέσεις σήμερα.")
         warnings.append("⚠️ Χωρίς δεδομένα για τον Nasdaq-100: καμία νέα θέση σήμερα.")
 
+    # Αναμονή ως 1 λεπτό μετά το άνοιγμα: αγορές και κλεισίματα στην τιμή ανοίγματος, όπως στο backtest
+    wait = (trade_at - datetime.now(NY)).total_seconds()
+    if not force and wait > 0:
+        say(f"Αναμονή {wait / 60:.0f}′ ως τις {trade_at:%H:%M} Νέα Υόρκη (άνοιγμα της αγοράς).")
+        time.sleep(wait)
+
     # 2) Σύνδεση με την Capital.com
     names = ["CAPITAL_API_KEY", "CAPITAL_IDENTIFIER", "CAPITAL_PASSWORD"]
     missing = [n for n in names if not os.environ.get(n, "").strip()]
@@ -247,6 +267,13 @@ def run() -> int:
         say(f"Demo: υπόλοιπο {acc['balance']:.2f} · χωρίς ανοιχτά {acc['deposit']:.2f} · "
             f"ανοιχτά κ/ζ {acc['pnl']:+.2f} · διαθέσιμα {acc['available']:.2f} · "
             f"λογαριασμοί {acc['n_accounts']} · τρέχων: {'ναι' if acc['is_current'] else 'όχι'}")
+    for ps in positions:   # κάθε θέση του bot πρέπει να έχει stop-loss και στόχο καταχωρημένα στην Capital.com
+        px = float(ps["bid"] or ps["level"])
+        say(f"Θέση {ps['epic']} @ {ps['level']:.2f} · τώρα {px:.2f} ({(px / ps['level'] - 1) * 100:+.1f}%) · "
+            f"stop {ps['stop'] if ps['stop'] is not None else '—'} · στόχος {ps['tp'] if ps['tp'] is not None else '—'}")
+        if ps["stop"] is None or ps["tp"] is None:
+            missing = " και ".join(n for n, v in (("stop-loss", ps["stop"]), ("στόχο", ps["tp"])) if v is None)
+            warnings.append(f"⚠️ Η θέση {ps['epic']} δεν έχει {missing} στην Capital.com! Βάλ' το από την εφαρμογή.")
     if others:   # θέσεις που δεν είναι του bot (π.χ. χειροκίνητες): δεσμεύουν διαθέσιμα και επηρεάζουν την αξία
         if env == "demo":
             say("Άλλες θέσεις στον λογαριασμό (όχι του bot): " + "; ".join(
@@ -446,6 +473,9 @@ def run() -> int:
 
     if not actions:
         say("Καμία κίνηση σήμερα.")
+    if dry and not force:   # και οι προγραμματισμένες δοκιμές τρέχουν μία φορά τη μέρα
+        JOURNAL.mkdir(exist_ok=True)
+        (JOURNAL / DRY_MARK).write_text(json.dumps({"last_run": str(today.date())}), encoding="utf-8")
     if record:
         meta["last_run"] = str(today.date())
         save_state(meta)
