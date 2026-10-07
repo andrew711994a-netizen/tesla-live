@@ -19,6 +19,7 @@ import json
 import math
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -224,6 +225,11 @@ def run() -> int:
         cap = Capital(os.environ["CAPITAL_API_KEY"], os.environ["CAPITAL_IDENTIFIER"],
                       os.environ["CAPITAL_PASSWORD"], env)
         acc = cap.account()
+        for _ in range(3):   # η Capital.com δείχνει καμιά φορά για λίγα λεπτά τον demo στο 0: ξαναρωτάμε
+            if acc["equity"] > 0:
+                break
+            time.sleep(20)
+            acc = cap.account()
         all_positions = cap.positions()
         positions = [ps for ps in all_positions if ps["epic"] in universe.values()]
         others = [ps for ps in all_positions if ps["epic"] not in universe.values()]
