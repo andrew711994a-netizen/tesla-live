@@ -10,7 +10,7 @@ strategy("Trend Pullback / Breakout", overlay = true,
 // ───────────── Ρυθμίσεις ─────────────
 grpT = "Τάση"
 emaFastLen = input.int(50, "EMA γρήγορος", minval = 5, group = grpT)
-emaSlowLen = input.int(200, "EMA αργός", minval = 20, group = grpT)
+emaSlowLen = input.int(150, "EMA αργός", minval = 20, group = grpT)
 
 grpE = "Είσοδος"
 usePullback = input.bool(true, "Είσοδος σε υποχώρηση (RSI γυρίζει πάνω)", group = grpE)

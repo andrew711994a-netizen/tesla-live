@@ -53,7 +53,7 @@
   "market_symbol": "^NDX",
   "strategy": {
     "ema_fast": 50,
-    "ema_slow": 200,
+    "ema_slow": 150,
     "use_pullback": true,
     "rsi_len": 14,
     "rsi_level": 40,

@@ -386,7 +386,7 @@ def run() -> int:
         actions.append(msg)
     if rk.get("use_market_filter") and not market_is_ok:
         allow_new = False
-        say("Φίλτρο αγοράς: ο Nasdaq-100 είναι κάτω από τον μέσο 200 ημερών. Χωρίς νέες αγορές σήμερα.")
+        say(f"Φίλτρο αγοράς: ο Nasdaq-100 είναι κάτω από τον μέσο {p.ema_slow} ημερών. Χωρίς νέες αγορές σήμερα.")
 
     # 5) Νέες θέσεις (όλα τα ποσά στο νόμισμα του λογαριασμού)
     rates: dict[str, float] = {}
