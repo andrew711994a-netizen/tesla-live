@@ -24,6 +24,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from pandas.tseries.holiday import (AbstractHolidayCalendar, GoodFriday, Holiday, USLaborDay,
+                                    USMartinLutherKingJr, USMemorialDay, USPresidentsDay,
+                                    USThanksgivingDay, nearest_workday, sunday_to_monday)
 
 from .capital import Capital, CapitalError
 from .data import daily
@@ -33,6 +36,22 @@ from .strategy import Params, market_ok, signals
 NY = ZoneInfo("America/New_York")
 CONFIG = json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8"))
 JOURNAL = Path(__file__).resolve().parent.parent / "journal"
+
+
+class NYSEHolidays(AbstractHolidayCalendar):
+    """Οι αργίες του χρηματιστηρίου της Νέας Υόρκης (χωρίς τις έκτακτες, π.χ. εθνικό πένθος)."""
+    rules = [
+        Holiday("Πρωτοχρονιά", month=1, day=1, observance=sunday_to_monday),
+        USMartinLutherKingJr, USPresidentsDay, GoodFriday, USMemorialDay,
+        Holiday("Juneteenth", month=6, day=19, start_date="2022-01-01", observance=nearest_workday),
+        Holiday("Ημέρα Ανεξαρτησίας", month=7, day=4, observance=nearest_workday),
+        USLaborDay, USThanksgivingDay,
+        Holiday("Χριστούγεννα", month=12, day=25, observance=nearest_workday),
+    ]
+
+
+def market_holiday(day: pd.Timestamp) -> bool:
+    return len(NYSEHolidays().holidays(day, day)) > 0
 
 
 # ── Ημερολόγιο (χωρίς ποσά: μόνο σύμβολα, τιμές και ποσοστά) ──
@@ -138,6 +157,9 @@ def run() -> int:
         if now.weekday() >= 5 or not ((now.hour, now.minute) >= (9, 35) and now.hour < 11):
             print(f"Εκτός παραθύρου εκτέλεσης ({now:%a %H:%M} Νέα Υόρκη). Τίποτα να κάνω.")
             return SKIP
+        if market_holiday(pd.Timestamp(now.date())):
+            print("Αργία στο χρηματιστήριο της Νέας Υόρκης σήμερα. Τίποτα να κάνω.")
+            return SKIP
         if not dry and load_state().get("last_run") == str(now.date()):
             # Με τη θερινή ώρα και τα δύο cron πέφτουν μέσα στο παράθυρο: τρέχουμε μία φορά τη μέρα.
             # Αν η πρώτη εκτέλεση απέτυχε, η δεύτερη λειτουργεί ως επανάληψη.
@@ -156,6 +178,7 @@ def run() -> int:
     sigs: dict[str, pd.Series] = {}
     bars: dict[str, pd.DatetimeIndex] = {}
     frames: dict[str, pd.DataFrame] = {}
+    warnings: list[str] = []                               # προβλήματα δεδομένων: πάνε και στην ειδοποίηση
     market_is_ok = False
     for sym in set(universe) | {CONFIG["market_symbol"]}:
         try:
@@ -169,8 +192,22 @@ def run() -> int:
                 market_is_ok = bool(market_ok(df, p).iloc[-1])
         except Exception as e:
             say(f"⚠️ {sym}: δεν ήρθαν δεδομένα ({e})")
+    n_all = len(set(universe) | {CONFIG["market_symbol"]})
+    if len(frames) < n_all:
+        warnings.append(f"⚠️ Δεδομένα Yahoo μόνο για {len(frames)}/{n_all} σύμβολα.")
+    # Μόνο φρέσκα δεδομένα: χωρίς το τελευταίο κερί της αγοράς, τα σήματα μιας μετοχής είναι παλιά
+    if frames:
+        last_day = max(df.index[-1] for df in frames.values())
+        stale = sorted(s for s, df in frames.items() if df.index[-1] < last_day)
+        for sym in stale:
+            say(f"⚠️ {sym}: παλιά δεδομένα (τελευταίο κερί {frames[sym].index[-1]:%d/%m}), χωρίς σήμα σήμερα.")
+            sigs.pop(sym, None)
+        if stale:
+            warnings.append(f"⚠️ Παλιά δεδομένα (αγνοήθηκαν σήμερα): {', '.join(stale)}.")
     if CONFIG["market_symbol"] not in sigs:
+        market_is_ok = False
         say("Χωρίς δεδομένα αγοράς, δεν ανοίγω νέες θέσεις σήμερα.")
+        warnings.append("⚠️ Χωρίς δεδομένα για τον Nasdaq-100: καμία νέα θέση σήμερα.")
 
     # 2) Σύνδεση με την Capital.com
     names = ["CAPITAL_API_KEY", "CAPITAL_IDENTIFIER", "CAPITAL_PASSWORD"]
@@ -403,8 +440,9 @@ def run() -> int:
         append_csv("daily.csv", "date,env,equity_demo,open_positions,market_filter_ok,actions",
                    [today.date(), env, f"{equity:.2f}" if env == "demo" else "", open_now or "-",
                     market_is_ok, " | ".join(actions) or "-"])
-    title = f"Bot {env}{' (δοκιμή)' if dry else ''}: " + (f"{len(actions)} κινήσεις" if actions else "καμία κίνηση")
-    notify(title, "\n".join(actions) if actions else "Δεν υπήρξαν σήματα σήμερα.")
+    title = (f"Bot {env}{' (δοκιμή)' if dry else ''}: " + (f"{len(actions)} κινήσεις" if actions else "καμία κίνηση")
+             + (" ⚠️" if warnings else ""))
+    notify(title, "\n".join(warnings + actions) or "Δεν υπήρξαν σήματα σήμερα.")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         Path(summary).write_text("\n\n".join(log), encoding="utf-8")
