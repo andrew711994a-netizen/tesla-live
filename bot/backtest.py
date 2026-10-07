@@ -139,7 +139,7 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
             if d in data[s].index:
                 last_close[s] = data[s].at[d, "Close"]
         equity = cash + sum(ps["qty"] * last_close.get(s, ps["entry"]) for s, ps in positions.items())
-        curve.append((d, equity))
+        curve.append((d, equity, cash))
         if positions:
             days_invested += 1
 
@@ -160,8 +160,10 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
     if dates:
         for s in list(positions):
             close_pos(s, last_close.get(s, positions[s]["entry"]), dates[-1], "Τέλος")
-    eq_series = pd.Series([e for _, e in curve], index=[d for d, _ in curve], dtype=float)
-    return {"trades": trades, "equity": eq_series, "initial": initial,
+    idx = [d for d, _, _ in curve]
+    eq_series = pd.Series([e for _, e, _ in curve], index=idx, dtype=float)
+    cash_series = pd.Series([c for _, _, c in curve], index=idx, dtype=float)   # αδιάθετα στο κλείσιμο
+    return {"trades": trades, "equity": eq_series, "cash": cash_series, "initial": initial,
             "exposure": days_invested / max(len(dates), 1)}
 
 
