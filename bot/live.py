@@ -224,7 +224,9 @@ def run() -> int:
         cap = Capital(os.environ["CAPITAL_API_KEY"], os.environ["CAPITAL_IDENTIFIER"],
                       os.environ["CAPITAL_PASSWORD"], env)
         acc = cap.account()
-        positions = [ps for ps in cap.positions() if ps["epic"] in universe.values()]
+        all_positions = cap.positions()
+        positions = [ps for ps in all_positions if ps["epic"] in universe.values()]
+        others = [ps for ps in all_positions if ps["epic"] not in universe.values()]
     except KeyError as e:
         # Δεν έχει στηθεί ακόμα: τερματισμός χωρίς σφάλμα, για να μη στέλνει το GitHub email αποτυχίας κάθε μέρα
         say(f"Δεν έχει οριστεί το secret {e}. Δες το bot/README.md. Τίποτα να κάνω.")
@@ -239,9 +241,15 @@ def run() -> int:
         say(f"Demo: υπόλοιπο {acc['balance']:.2f} · χωρίς ανοιχτά {acc['deposit']:.2f} · "
             f"ανοιχτά κ/ζ {acc['pnl']:+.2f} · διαθέσιμα {acc['available']:.2f} · "
             f"λογαριασμοί {acc['n_accounts']} · τρέχων: {'ναι' if acc['is_current'] else 'όχι'}")
+    if others:   # θέσεις που δεν είναι του bot (π.χ. χειροκίνητες): δεσμεύουν διαθέσιμα και επηρεάζουν την αξία
+        if env == "demo":
+            say("Άλλες θέσεις στον λογαριασμό (όχι του bot): " + "; ".join(
+                f"{ps['epic']} {ps['direction']} {ps['size']} @ {ps['level']} · κ/ζ {ps['upl']:+.2f}" for ps in others))
+        else:
+            say(f"Άλλες θέσεις στον λογαριασμό (όχι του bot): {len(others)}")
     if equity <= 0:
         say("🛑 Η αξία του λογαριασμού φαίνεται μηδενική ή αρνητική. Δεν κάνω τίποτα, έλεγξε τον λογαριασμό.")
-        notify("Bot: πρόβλημα στον λογαριασμό", log[-1])
+        notify("Bot: πρόβλημα στον λογαριασμό", "\n".join(log[-3:]))
         return 1
     if env_flag("CHECK_EPICS", False):
         # Διαγνωστικό (μόνο σε χειροκίνητη δοκιμή): υπάρχουν όλες οι μετοχές στην Capital.com;
