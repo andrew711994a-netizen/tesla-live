@@ -1,20 +1,28 @@
 name: Research plus
 
-# Έρευνα κερδοφορίας (bot/research_plus.py). Τρέχει μόνο χειροκίνητα· δεν αλλάζει τίποτα στο bot.
+# Έρευνες κερδοφορίας (bot/research_*.py). Τρέχουν μόνο χειροκίνητα· δεν αλλάζουν τίποτα στο bot.
 on:
   workflow_dispatch:
+    inputs:
+      study:
+        description: "Ποια έρευνα"
+        type: choice
+        options: [research_plus, research_exits]
+        default: research_plus
 
 permissions:
   contents: write
 
 concurrency:
-  group: research-plus
+  group: research-${{ inputs.study }}
   cancel-in-progress: true
 
 jobs:
   research:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      STUDY: ${{ inputs.study }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,8 +33,9 @@ jobs:
       - run: pip install -r bot/requirements.txt
       - name: Run research
         run: |
-          python -m bot.research_plus
-          cat reports/research_plus.md >> "$GITHUB_STEP_SUMMARY"
+          case "$STUDY" in research_plus|research_exits) ;; *) echo "Άγνωστη έρευνα: $STUDY"; exit 1;; esac
+          python -m "bot.$STUDY"
+          cat "reports/$STUDY.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Save report
         run: |
           git config user.name "backtest-bot"
