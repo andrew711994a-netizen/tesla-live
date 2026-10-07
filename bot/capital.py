@@ -103,7 +103,8 @@ class Capital:
                         "direction": pos.get("direction"), "size": float(pos.get("size", 0)),
                         "level": float(pos.get("level", 0)), "created": pos.get("createdDateUTC") or pos.get("createdDate"),
                         "stop": pos.get("stopLevel"), "tp": pos.get("profitLevel"),
-                        "upl": float(pos.get("upl", 0) or 0), "bid": mkt.get("bid")})
+                        "upl": float(pos.get("upl", 0) or 0), "bid": mkt.get("bid"),
+                        "currency": pos.get("currency")})
         return out
 
     def open(self, epic: str, size: float, stop: float, tp: float, direction: str = "BUY") -> dict:

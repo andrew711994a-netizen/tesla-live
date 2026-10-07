@@ -89,6 +89,7 @@ def round_size(qty: float, step: float, min_size: float) -> float:
 
 
 LOG: list[str] = []
+SKIP = -1  # εκτός ωραρίου ή έτρεξε ήδη σήμερα: το σημείωμα της κανονικής εκτέλεσης μένει ως έχει
 
 
 def write_run_log(status: str) -> None:
@@ -109,6 +110,8 @@ def main() -> int:
         print("\n".join(LOG))
         notify("Bot: απρόβλεπτο σφάλμα", "\n".join(LOG[-5:]))
         code = 1
+    if code == SKIP:
+        return 0
     write_run_log("OK" if code == 0 else "ΣΦΑΛΜΑ")
     return code
 
@@ -132,8 +135,13 @@ def run() -> int:
     now = datetime.now(NY)
     if not env_flag("FORCE", False):
         if now.weekday() >= 5 or not ((now.hour, now.minute) >= (9, 35) and now.hour < 11):
-            say(f"Εκτός παραθύρου εκτέλεσης ({now:%a %H:%M} Νέα Υόρκη). Τίποτα να κάνω.")
-            return 0
+            print(f"Εκτός παραθύρου εκτέλεσης ({now:%a %H:%M} Νέα Υόρκη). Τίποτα να κάνω.")
+            return SKIP
+        if not dry and load_state().get("last_run") == str(now.date()):
+            # Με τη θερινή ώρα και τα δύο cron πέφτουν μέσα στο παράθυρο: τρέχουμε μία φορά τη μέρα.
+            # Αν η πρώτη εκτέλεση απέτυχε, η δεύτερη λειτουργεί ως επανάληψη.
+            print("Το bot έτρεξε ήδη σήμερα. Τίποτα να κάνω.")
+            return SKIP
 
     p = Params.from_dict(CONFIG["strategy"])
     rk = CONFIG["risk"]
@@ -214,6 +222,11 @@ def run() -> int:
     record = not dry                                    # το ημερολόγιο γράφει μόνο πραγματικές κινήσεις (demo ή live)
     meta = load_state() if record else {"positions": {}, "peak_equity": None}
     state = meta["positions"]
+
+    def persist() -> None:
+        if record:
+            save_state(meta)
+
     live_epics = {ps["epic"] for ps in positions}
     for epic, entry in list(state.items()):
         if epic in live_epics:
@@ -236,6 +249,7 @@ def run() -> int:
         log_trade(entry, today.date(), px, why, env)
         say(f"Έκλεισε στην Capital.com: {entry['symbol']} · {why} · {(px / entry['entry'] - 1) * 100:+.1f}%")
         state.pop(epic)
+        persist()
 
     # 3) Έξοδοι λόγω χρόνου ή σπασμένης τάσης (stop και στόχος είναι ήδη στην Capital.com)
     for ps in positions:
@@ -258,6 +272,7 @@ def run() -> int:
                 exit_px = float(conf.get("level") or ps.get("bid") or sg["close"])
                 if ps["epic"] in state:
                     log_trade(state.pop(ps["epic"]), today.date(), exit_px, reason, env)
+                    persist()
             except CapitalError as e:
                 msg += f" · ΑΠΕΤΥΧΕ: {e}"
         actions.append(msg)
@@ -294,7 +309,24 @@ def run() -> int:
         allow_new = False
         say("Φίλτρο αγοράς: ο Nasdaq-100 είναι κάτω από τον μέσο 200 ημερών. Χωρίς νέες αγορές σήμερα.")
 
-    # 5) Νέες θέσεις
+    # 5) Νέες θέσεις (όλα τα ποσά στο νόμισμα του λογαριασμού)
+    rates: dict[str, float] = {}
+
+    def to_acc(cur: str) -> float:
+        if cur not in rates:
+            rates[cur] = fx_rate(cur, acc["currency"])
+        return rates[cur]
+
+    risk_used = notional_used = 0.0
+    if allow_new:
+        try:
+            for ps in still_open:
+                r = to_acc(ps.get("currency") or cap.market(ps["epic"])["currency"])
+                risk_used += abs(ps["level"] - float(ps["stop"] or ps["level"])) * ps["size"] * r
+                notional_used += ps["level"] * ps["size"] * r
+        except Exception as e:
+            allow_new = False
+            say(f"⚠️ Δεν υπολογίστηκε το ρίσκο των ανοιχτών θέσεων ({e}). Χωρίς νέες θέσεις σήμερα.")
     if allow_new:
         cands = []
         for sym, epic in universe.items():
@@ -304,8 +336,6 @@ def run() -> int:
             mom = sg["mom63"] if not pd.isna(sg["mom63"]) else -9
             cands.append((mom, sym, epic, sg))
         cands.sort(key=lambda x: x[0], reverse=True)
-        risk_used = sum(abs(ps["level"] - float(ps["stop"] or ps["level"])) * ps["size"] for ps in still_open)
-        notional_used = sum(ps["level"] * ps["size"] for ps in still_open)
         n_open = len(still_open)
         available = acc["available"] * 0.98            # λίγο περιθώριο για spread και συναλλάγματα
         for _, sym, epic, sg in cands:
@@ -314,7 +344,7 @@ def run() -> int:
                 continue
             try:
                 m = cap.market(epic)
-                rate = fx_rate(m["currency"], acc["currency"])
+                rate = to_acc(m["currency"])
             except Exception as e:
                 say(f"Παράλειψη {sym}: {e}")
                 continue
@@ -332,13 +362,15 @@ def run() -> int:
                 say(f"Παράλειψη {sym}: stop/στόχος πιο κοντά από το ελάχιστο της Capital.com.")
                 continue
             # Μέγεθος σε μονάδες του προϊόντος, με όλα τα ποσά στο νόμισμα του λογαριασμού
-            qty = equity * rk["risk_per_trade"] / (dist * rate)
-            qty = min(qty, max(0.0, rk["max_total_risk"] * equity - risk_used) / (dist * rate))
-            qty = min(qty, max(0.0, rk["max_notional"] * equity - notional_used) / (price * rate))
-            qty = min(qty, max(0.0, available) / (price * rate))
-            size = round_size(qty, m["size_step"], m["min_size"])
+            qty_risk = equity * rk["risk_per_trade"] / (dist * rate)
+            qty_room = min(max(0.0, rk["max_total_risk"] * equity - risk_used) / (dist * rate),
+                           max(0.0, rk["max_notional"] * equity - notional_used) / (price * rate),
+                           max(0.0, available) / (price * rate))
+            size = round_size(min(qty_risk, qty_room), m["size_step"], m["min_size"])
             if size <= 0:
-                say(f"Παράλειψη {sym}: πολύ μικρό μέγεθος για το ελάχιστο της Capital.com ({m['min_size']}).")
+                why = ("δεν περισσεύει ρίσκο ή κεφάλαιο" if qty_room < qty_risk
+                       else f"πολύ μικρό μέγεθος για το ελάχιστο της Capital.com ({m['min_size']})")
+                say(f"Παράλειψη {sym}: {why}.")
                 continue
             msg = (f"ΑΓΟΡΑ {sym} ({epic}) · {size} μονάδες στα ~{price:.2f} · stop {stop:.2f} "
                    f"({(stop / price - 1) * 100:+.1f}%) · στόχος {tp:.2f} ({(tp / price - 1) * 100:+.1f}%) · {sg['kind']}")
@@ -347,18 +379,20 @@ def run() -> int:
                     conf = cap.open(epic, size, stop, tp)
                     state[epic] = {"symbol": sym, "date": str(today.date()), "entry": float(conf.get("level") or price),
                                    "stop": stop, "tp": tp, "kind": sg["kind"]}
+                    persist()
                 except CapitalError as e:
                     msg += f" · ΑΠΕΤΥΧΕ: {e}"
             actions.append(msg)
             say(msg)
             n_open += 1
-            risk_used += dist * size
-            notional_used += price * size
+            risk_used += dist * size * rate
+            notional_used += price * size * rate
             available -= price * size * rate
 
     if not actions:
         say("Καμία κίνηση σήμερα.")
     if record:
+        meta["last_run"] = str(today.date())
         save_state(meta)
         open_now = ";".join(f"{epic_to_sym[ps['epic']]}:{((float(ps['bid'] or ps['level']) / ps['level']) - 1) * 100:+.1f}%"
                             for ps in still_open if ps["level"])
