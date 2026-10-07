@@ -90,6 +90,7 @@ def round_size(qty: float, step: float, min_size: float) -> float:
 
 LOG: list[str] = []
 SKIP = -1  # εκτός ωραρίου ή έτρεξε ήδη σήμερα: το σημείωμα της κανονικής εκτέλεσης μένει ως έχει
+MIN_POSITION = 0.02  # όπως το backtest: καμία θέση κάτω από το 2% του λογαριασμού
 
 
 def write_run_log(status: str) -> None:
@@ -323,7 +324,7 @@ def run() -> int:
             for ps in still_open:
                 r = to_acc(ps.get("currency") or cap.market(ps["epic"])["currency"])
                 risk_used += abs(ps["level"] - float(ps["stop"] or ps["level"])) * ps["size"] * r
-                notional_used += ps["level"] * ps["size"] * r
+                notional_used += float(ps["bid"] or ps["level"]) * ps["size"] * r
         except Exception as e:
             allow_new = False
             say(f"⚠️ Δεν υπολογίστηκε το ρίσκο των ανοιχτών θέσεων ({e}). Χωρίς νέες θέσεις σήμερα.")
@@ -332,6 +333,9 @@ def run() -> int:
         for sym, epic in universe.items():
             sg = sigs.get(sym)
             if sg is None or not bool(sg["long_sig"]) or epic in {ps["epic"] for ps in still_open}:
+                continue
+            if sym in closed:   # όπως το backtest: όχι ξανά αγορά τη μέρα που βγήκε (διπλό spread χωρίς λόγο)
+                say(f"Παράλειψη {sym}: έκλεισε σήμερα, όχι ξανά αγορά την ίδια μέρα.")
                 continue
             mom = sg["mom63"] if not pd.isna(sg["mom63"]) else -9
             cands.append((mom, sym, epic, sg))
@@ -367,9 +371,9 @@ def run() -> int:
                            max(0.0, rk["max_notional"] * equity - notional_used) / (price * rate),
                            max(0.0, available) / (price * rate))
             size = round_size(min(qty_risk, qty_room), m["size_step"], m["min_size"])
-            if size <= 0:
+            if size * price * rate < MIN_POSITION * equity:
                 why = ("δεν περισσεύει ρίσκο ή κεφάλαιο" if qty_room < qty_risk
-                       else f"πολύ μικρό μέγεθος για το ελάχιστο της Capital.com ({m['min_size']})")
+                       else f"πολύ μικρή θέση (κάτω από {MIN_POSITION:.0%} του λογαριασμού)")
                 say(f"Παράλειψη {sym}: {why}.")
                 continue
             msg = (f"ΑΓΟΡΑ {sym} ({epic}) · {size} μονάδες στα ~{price:.2f} · stop {stop:.2f} "
