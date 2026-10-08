@@ -1,2 +1,3 @@
 date,env,equity_demo,open_positions,market_filter_ok,actions
 2026-10-07,demo,10000.00,-,True,ΑΓΟΡΑ MRK (MRK) · 14.79 μονάδες στα ~142.60 · stop 135.04 (-5.3%) · στόχος 152.28 (+6.8%) · pullback | ΑΓΟΡΑ AVGO (AVGO) · 6.26 μονάδες στα ~371.13 · stop 353.30 (-4.8%) · στόχος 409.58 (+10.4%) · breakout
+2026-10-08,demo,9980.54,MRK:-0.8%;AVGO:-0.2%,True,ΑΓΟΡΑ ABBV (ABBV) · 9.47 μονάδες στα ~271.76 · stop 259.97 (-4.3%) · στόχος 288.45 (+6.1%) · breakout | ΑΓΟΡΑ JNJ (JNJ) · 12.02 μονάδες στα ~257.64 · stop 248.35 (-3.6%) · στόχος 273.61 (+6.2%) · pullback
