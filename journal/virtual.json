@@ -1,0 +1,40 @@
+{
+ "updated": "2026-10-09",
+ "since": "2026-10-07",
+ "missing": [],
+ "closed": {
+  "trades": 0
+ },
+ "open": [
+  {
+   "symbol": "MRK",
+   "date": "2026-10-07",
+   "entry": 142.03,
+   "last_close": 142.38,
+   "result_pct": 0.11,
+   "r": 0.02,
+   "real": true
+  },
+  {
+   "symbol": "ABBV",
+   "date": "2026-10-08",
+   "entry": 270.98,
+   "last_close": 272.42,
+   "result_pct": 0.39,
+   "r": 0.09,
+   "real": true
+  },
+  {
+   "symbol": "JNJ",
+   "date": "2026-10-08",
+   "entry": 256.22,
+   "last_close": 256.48,
+   "result_pct": -0.04,
+   "r": -0.01,
+   "real": true
+  }
+ ],
+ "signals_today": [
+  "VZ"
+ ]
+}
