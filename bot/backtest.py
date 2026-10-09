@@ -188,6 +188,30 @@ def stats(res: dict) -> dict:
     }
 
 
+def every_signal(risk: Risk) -> Risk:
+    """Κάθε σήμα σαν να αγοράστηκε: χωρίς όριο θέσεων, ρίσκου ή κεφαλαίου.
+
+    Μόνο για στατιστικά ανά συναλλαγή: το R και το % μιας συναλλαγής δεν εξαρτώνται από το μέγεθος της θέσης.
+    """
+    return Risk(risk.risk_per_trade, 10**6, 1e9, 1e9, risk.use_market_filter)
+
+
+def trade_stats(trades: list[dict], window: int = 30) -> dict:
+    """Στατιστικά ανά συναλλαγή μετά τα κόστη, για σύγκριση με το εικονικό ημερολόγιο του bot."""
+    if not trades:
+        return {"trades": 0}
+    tr = sorted(trades, key=lambda t: t["exit_date"])
+    r = pd.Series([t["r"] for t in tr], dtype=float)
+    pc = np.array([t["pnl"] / (t["qty"] * t["entry"]) for t in tr])
+    out = {"trades": len(tr), "win": float((r > 0).mean()), "avg_r": float(r.mean()),
+           "avg_pct": float(pc.mean()), "total_r": float(r.sum())}
+    if len(r) >= window:   # πόσο κυμαίνονται 30 συνεχόμενες συναλλαγές, ακόμα κι όταν η στρατηγική δουλεύει
+        roll = r.rolling(window).mean().dropna()
+        out |= {"avg_r_p05": float(roll.quantile(0.05)), "avg_r_p95": float(roll.quantile(0.95)),
+                "neg_share": float((roll < 0).mean())}
+    return out
+
+
 def buy_hold(df: pd.DataFrame, start: str, end: str | None) -> dict:
     c = df["Close"]
     c = c[c.index >= pd.Timestamp(start)]
@@ -268,10 +292,33 @@ def main() -> None:
         out.append(row(s, st))
     out.append("")
 
+    # Μέτρο σύγκρισης για το εικονικό ημερολόγιο του bot (journal/virtual_trades.csv)
+    every = every_signal(rcfg(True))
+    out += ["## 3. Κάθε σήμα χωριστά (μέτρο σύγκρισης για το εικονικό ημερολόγιο)", "",
+            "Κάθε σήμα σαν να αγοράστηκε, χωρίς όριο θέσεων ή κεφαλαίου, με φίλτρο αγοράς και κόστη Capital.com 1:1, "
+            "όπως το `journal/virtual_trades.csv`. R: αποτέλεσμα σε πολλαπλάσια του αρχικού ρίσκου "
+            "(−1 ≈ έπιασε το stop, +1,5 ≈ έπιασε τον στόχο). Το εύρος δείχνει πόσο κυμαίνεται το μέσο R "
+            "30 συνεχόμενων συναλλαγών μόνο από τύχη.", "",
+            "| | Συναλλαγές | Επιτυχία | Μέσο R | Μέσο αποτέλεσμα | Μέσο R σε 30 συνεχόμενες (5%–95%) | 30άδες με ζημιά |",
+            "|---|---|---|---|---|---|---|"]
+    every_stats = {}
+    for period, (start, end) in PERIODS.items():
+        ts = trade_stats(run(tradable, p, every, real_costs, start, end, market)["trades"])
+        every_stats[period] = ts
+        if ts["trades"] == 0:
+            out.append(f"| {period} | 0 | – | – | – | – | – |")
+            continue
+        band = (f"{num(ts['avg_r_p05'])} έως {num(ts['avg_r_p95'])}" if "avg_r_p05" in ts else "–")
+        neg = f"{ts['neg_share'] * 100:.0f}%" if "neg_share" in ts else "–"
+        out.append(f"| {period} | {ts['trades']} | {ts['win'] * 100:.0f}% | {num(ts['avg_r'])} | "
+                   f"{pct(ts['avg_pct'])} | {band} | {neg} |")
+    out.append("")
+
     path = ROOT / "reports"
     path.mkdir(exist_ok=True)
     (path / "backtest.md").write_text("\n".join(out), encoding="utf-8")
-    (path / "backtest.json").write_text(json.dumps({"portfolio": summary, "per_symbol": per_symbol},
+    (path / "backtest.json").write_text(json.dumps({"portfolio": summary, "per_symbol": per_symbol,
+                                                    "every_signal": every_stats},
                                                    ensure_ascii=False, indent=1, default=float),
                                         encoding="utf-8")
     print("\n".join(out))

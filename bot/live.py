@@ -90,6 +90,69 @@ def log_trade(entry: dict, exit_date, exit_px: float, reason: str, env: str) -> 
                 f"{res * 100:+.2f}", f"{r:+.2f}", reason, env])
 
 
+VIRTUAL = "virtual.json"
+
+
+def update_virtual(frames: dict, p: Params, rk: dict, state: dict, sigs: dict, market_is_ok: bool,
+                   today: pd.Timestamp) -> str:
+    """Εικονικό ημερολόγιο: κάθε σήμα από την πρώτη μέρα του bot σαν να αγοράστηκε, χωρίς όριο θέσεων ή κεφαλαίου.
+
+    Καμία εντολή, μόνο καταγραφή, για να κριθεί η στρατηγική με πολύ περισσότερες συναλλαγές. Ξαναϋπολογίζεται
+    κάθε μέρα από τα ημερήσια κεριά με τους κανόνες του backtest (είσοδος στο άνοιγμα, stop/στόχος, 20 μέρες,
+    σπασμένη τάση, κόστη), οπότε δεν χάνει μέρες ούτε μετρά κάτι δύο φορές.
+    """
+    from .backtest import Costs, Risk, every_signal, run as replay, trade_stats
+
+    market = frames.get(CONFIG["market_symbol"])
+    days_log = JOURNAL / "daily.csv"
+    if market is None or not days_log.exists():
+        return "Εικονικό ημερολόγιο: δεν ενημερώθηκε σήμερα (λείπουν δεδομένα αγοράς)."
+    first = pd.Timestamp(pd.read_csv(days_log)["date"].min())   # πρώτη μέρα του bot
+    before = market.index[market.index < first]
+    start = before[-1] if len(before) else first               # τα σήματα εκείνου του κλεισίματος μπαίνουν την πρώτη μέρα
+    data = {s: frames[s] for s in CONFIG["universe"] if s in frames}
+    risk = every_signal(Risk(rk["risk_per_trade"], use_market_filter=rk["use_market_filter"]))
+    trades = replay(data, p, risk, Costs(**CONFIG["costs"]), str(start.date()), market=market)["trades"]
+
+    real = {(v["symbol"], v["date"]) for v in state.values()}  # ό,τι αγόρασε πραγματικά το bot
+    if (JOURNAL / "trades.csv").exists():
+        t = pd.read_csv(JOURNAL / "trades.csv", dtype=str)
+        real |= set(zip(t["symbol"], t["open_date"]))
+
+    def is_real(t: dict) -> bool:
+        return (t["symbol"], f"{t['entry_date']:%Y-%m-%d}") in real
+
+    def net(t: dict) -> float:   # % μετά τα κόστη
+        return t["pnl"] / (t["qty"] * t["entry"]) * 100
+
+    done = sorted((t for t in trades if t["reason"] != "Τέλος"), key=lambda t: (t["exit_date"], t["symbol"]))
+    still = sorted((t for t in trades if t["reason"] == "Τέλος"), key=lambda t: (t["entry_date"], t["symbol"]))
+    JOURNAL.mkdir(exist_ok=True)
+    lines = ["open_date,close_date,symbol,entry,exit,result_pct,r_multiple,reason,real"]
+    lines += [f"{t['entry_date']:%Y-%m-%d},{t['exit_date']:%Y-%m-%d},{t['symbol']},{t['entry']:.2f},{t['exit']:.2f},"
+              f"{net(t):+.2f},{t['r']:+.2f},{t['reason']},{'ναι' if is_real(t) else 'όχι'}" for t in done]
+    (JOURNAL / "virtual_trades.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    holding = {t["symbol"] for t in still}
+    allowed = market_is_ok or not rk["use_market_filter"]
+    new = sorted(s for s in data if allowed and s in sigs and bool(sigs[s]["long_sig"]) and s not in holding)
+    book = {"updated": str(today.date()), "since": str(first.date()),
+            "missing": sorted(set(CONFIG["universe"]) - set(data)),
+            "closed": trade_stats(done),
+            "open": [{"symbol": t["symbol"], "date": f"{t['entry_date']:%Y-%m-%d}", "entry": round(t["entry"], 2),
+                      "last_close": round(t["exit"], 2), "result_pct": round(net(t), 2), "r": round(t["r"], 2),
+                      "real": is_real(t)} for t in still],
+            "signals_today": new}
+    (JOURNAL / VIRTUAL).write_text(json.dumps(book, ensure_ascii=False, indent=1), encoding="utf-8")
+    st = book["closed"]
+    msg = f"Εικονικό ημερολόγιο (όλα τα σήματα από {first:%d/%m}): {len(done)} κλεισμένες"
+    if done:
+        msg += f" (επιτυχία {st['win']:.0%}, μέσο R {st['avg_r']:+.2f})"
+    msg += f" · {len(still)} ανοιχτές · νέα σήματα σήμερα: {', '.join(new) or 'κανένα'}"
+    if book["missing"]:
+        msg += f" · ⚠️ χωρίς δεδομένα: {', '.join(book['missing'])}"
+    return msg
+
+
 def env_flag(name: str, default: bool) -> bool:
     v = os.environ.get(name, "").strip().lower()
     return default if v == "" else v in ("1", "true", "yes", "on")
@@ -484,6 +547,10 @@ def run() -> int:
         append_csv("daily.csv", "date,env,equity_demo,open_positions,market_filter_ok,actions",
                    [today.date(), env, f"{equity:.2f}" if env == "demo" else "", open_now or "-",
                     market_is_ok, " | ".join(actions) or "-"])
+        try:   # μόνο καταγραφή: ένα σφάλμα εδώ δεν επηρεάζει τις πραγματικές συναλλαγές
+            say(update_virtual(frames, p, rk, state, sigs, market_is_ok, today))
+        except Exception as e:
+            say(f"⚠️ Εικονικό ημερολόγιο: {type(e).__name__}: {e}")
     title = (f"Bot {env}{' (δοκιμή)' if dry else ''}: " + (f"{len(actions)} κινήσεις" if actions else "καμία κίνηση")
              + (" ⚠️" if warnings else ""))
     notify(title, "\n".join(warnings + actions) or "Δεν υπήρξαν σήματα σήμερα.")
