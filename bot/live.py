@@ -180,6 +180,7 @@ MIN_POSITION = 0.02  # όπως το backtest: καμία θέση κάτω απ
 TRADE_AT = (9, 31)   # αγορές/κλεισίματα 1 λεπτό μετά το άνοιγμα της Νέας Υόρκης (≈ τιμή ανοίγματος, όπως το backtest)
 MAX_WAIT_MIN = 35    # το GitHub ξεκινά νωρίτερα και το bot περιμένει, γιατί οι προγραμματισμένες εκτελέσεις αργούν
 DRY_MARK = "dry_run.json"
+HISTORY_START = "2014-01-01"  # όπως το backtest: με όλο το ιστορικό οι μέσοι όροι (EMA) βγαίνουν ακριβώς ίδιοι
 
 
 def write_run_log(status: str) -> None:
@@ -252,7 +253,7 @@ def run() -> int:
 
     # 1) Δεδομένα και σήματα από το τελευταίο ολοκληρωμένο κλείσιμο
     today = pd.Timestamp(now.date())
-    start = (today - pd.Timedelta(days=500)).strftime("%Y-%m-%d")
+    start = HISTORY_START
     sigs: dict[str, pd.Series] = {}
     bars: dict[str, pd.DatetimeIndex] = {}
     frames: dict[str, pd.DataFrame] = {}
