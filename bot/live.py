@@ -30,9 +30,9 @@ from pandas.tseries.holiday import (AbstractHolidayCalendar, GoodFriday, Holiday
                                     USThanksgivingDay, nearest_workday, sunday_to_monday)
 
 from .capital import Capital, CapitalError
-from .data import daily
+from .data import daily, earnings_times
 from .notify import notify
-from .strategy import Params, market_ok, signals
+from .strategy import Params, event_sessions, market_ok, signals
 
 NY = ZoneInfo("America/New_York")
 CONFIG = json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8"))
@@ -94,7 +94,7 @@ VIRTUAL = "virtual.json"
 
 
 def update_virtual(frames: dict, p: Params, rk: dict, state: dict, sigs: dict, market_is_ok: bool,
-                   today: pd.Timestamp) -> str:
+                   today: pd.Timestamp, earn: dict | None = None) -> str:
     """Εικονικό ημερολόγιο: κάθε σήμα από την πρώτη μέρα του bot σαν να αγοράστηκε, χωρίς όριο θέσεων ή κεφαλαίου.
 
     Καμία εντολή, μόνο καταγραφή, για να κριθεί η στρατηγική με πολύ περισσότερες συναλλαγές. Ξαναϋπολογίζεται
@@ -112,7 +112,10 @@ def update_virtual(frames: dict, p: Params, rk: dict, state: dict, sigs: dict, m
     start = before[-1] if len(before) else first               # τα σήματα εκείνου του κλεισίματος μπαίνουν την πρώτη μέρα
     data = {s: frames[s] for s in CONFIG["universe"] if s in frames}
     risk = every_signal(Risk(rk["risk_per_trade"], use_market_filter=rk["use_market_filter"]))
-    trades = replay(data, p, risk, Costs(**CONFIG["costs"]), str(start.date()), market=market)["trades"]
+    ec = CONFIG.get("earnings", {})
+    events = {k: v for k, v in (earn or {}).items() if v is not None}
+    trades = replay(data, p, risk, Costs(**CONFIG["costs"]), str(start.date()), market=market, events=events,
+                    block=int(ec.get("block_sessions", 0)), exit_before=bool(ec.get("exit_before", False)))["trades"]
 
     real = {(v["symbol"], v["date"]) for v in state.values()}  # ό,τι αγόρασε πραγματικά το bot
     if (JOURNAL / "trades.csv").exists():
@@ -174,6 +177,41 @@ def broker_close(cap, epic: str, opened: str) -> tuple[float, str] | None:
             return float(last["details"]["level"]), CLOSE_REASONS.get(src, src or "Άγνωστο")
         end = start
     return None
+
+
+def trading_sessions(past: pd.DatetimeIndex, today: pd.Timestamp, days: int = 150) -> pd.DatetimeIndex:
+    """Οι συνεδριάσεις: οι περασμένες από τα δεδομένα και οι επόμενες εργάσιμες χωρίς τις αργίες της Νέας Υόρκης."""
+    future = pd.bdate_range(today, today + pd.Timedelta(days=days))
+    hol = set(NYSEHolidays().holidays(today, today + pd.Timedelta(days=days)))
+    return past[past < today].union(pd.DatetimeIndex([d for d in future if d not in hol]))
+
+
+def earnings_calendar(symbols, sessions: pd.DatetimeIndex) -> dict[str, list[pd.Timestamp] | None]:
+    """Οι συνεδριάσεις με αποτελέσματα ανά μετοχή· None αν δεν βρέθηκαν ημερομηνίες."""
+    out: dict[str, list[pd.Timestamp] | None] = {}
+    for sym in symbols:
+        try:
+            out[sym] = event_sessions(earnings_times(sym, limit=25, tries=2), sessions)
+        except Exception:
+            out[sym] = None
+    return out
+
+
+def sessions_to_results(events: list[pd.Timestamp] | None, sessions: pd.DatetimeIndex,
+                        today: pd.Timestamp) -> float | None:
+    """Σε πόσες συνεδριάσεις από σήμερα έρχονται τα επόμενα αποτελέσματα (1 = αύριο).
+
+    inf: δεν υπάρχει επόμενη ημερομηνία αλλά τα τελευταία αποτελέσματα βγήκαν πρόσφατα (≤ 75 μέρες), άρα τα
+    επόμενα αργούν. None: άγνωστο (για σιγουριά, καμία αγορά).
+    """
+    if events is None:
+        return None
+    i = int(sessions.searchsorted(today))
+    later = [e for e in events if e > today]
+    if later:
+        return int(sessions.searchsorted(later[0])) - i
+    past = [e for e in events if e <= today]
+    return float("inf") if past and (today - past[-1]).days <= 75 else None
 
 
 def env_flag(name: str, default: bool) -> bool:
@@ -311,6 +349,23 @@ def run() -> int:
         say("Χωρίς δεδομένα αγοράς, δεν ανοίγω νέες θέσεις σήμερα.")
         warnings.append("⚠️ Χωρίς δεδομένα για τον Nasdaq-100: καμία νέα θέση σήμερα.")
 
+    # Ημερολόγιο αποτελεσμάτων: καμία αγορά λίγο πριν τα αποτελέσματα, κλείσιμο την προηγούμενη συνεδρίαση
+    earn_cfg = CONFIG.get("earnings", {})
+    block = int(earn_cfg.get("block_sessions", 0))
+    exit_before = bool(earn_cfg.get("exit_before", False))
+    sessions = trading_sessions(frames[CONFIG["market_symbol"]].index if CONFIG["market_symbol"] in frames
+                                else pd.DatetimeIndex([]), today)
+    # Μόνο οι μετοχές που χρειάζονται σήμερα (σήματα αγοράς, και οι ανοιχτές αν κλείνουμε πριν τα αποτελέσματα)·
+    # οι υπόλοιπες κατεβαίνουν μετά τις συναλλαγές, για το εικονικό ημερολόγιο
+    need = [s for s in universe if s in sigs and bool(sigs[s]["long_sig"])]
+    if exit_before:
+        need = list(universe)
+    earn = earnings_calendar(need, sessions) if (block or exit_before) else {}
+    no_dates = sorted(s for s, ev in earn.items() if ev is None)
+    if no_dates:
+        say(f"⚠️ Χωρίς ημερομηνίες αποτελεσμάτων για: {', '.join(no_dates)} (καμία αγορά τους σήμερα).")
+        warnings.append(f"⚠️ Χωρίς ημερομηνίες αποτελεσμάτων (καμία αγορά τους σήμερα): {', '.join(no_dates)}.")
+
     # Αναμονή ως 1 λεπτό μετά το άνοιγμα: αγορές και κλεισίματα στην τιμή ανοίγματος, όπως στο backtest
     wait = (trade_at - datetime.now(NY)).total_seconds()
     if not force and wait > 0:
@@ -437,6 +492,8 @@ def run() -> int:
             created = (c.tz_convert(None) if c.tzinfo is not None else c).normalize()
         held = int((bars[sym] > created).sum())
         reason = "Χρόνος" if held >= p.max_bars else ("Τάση" if p.trend_exit and bool(sg["trend_broken"]) else "")
+        if not reason and exit_before and sessions_to_results(earn.get(sym), sessions, today) == 1:
+            reason = "Αποτελέσματα αύριο"
         if not reason:
             continue
         msg = f"ΚΛΕΙΣΙΜΟ {sym} ({ps['size']}) · λόγος: {reason}, {held} μέρες σε θέση"
@@ -510,6 +567,15 @@ def run() -> int:
             if sym in closed:   # όπως το backtest: όχι ξανά αγορά τη μέρα που βγήκε (διπλό spread χωρίς λόγο)
                 say(f"Παράλειψη {sym}: έκλεισε σήμερα, όχι ξανά αγορά την ίδια μέρα.")
                 continue
+            if block:
+                n = sessions_to_results(earn.get(sym), sessions, today)
+                if n is None:
+                    say(f"Παράλειψη {sym}: άγνωστη ημερομηνία αποτελεσμάτων, για σιγουριά όχι αγορά.")
+                    continue
+                if n <= block:
+                    when = sessions[int(sessions.searchsorted(today)) + int(n)]
+                    say(f"Παράλειψη {sym}: βγάζει αποτελέσματα σε {int(n)} συνεδρ. ({when:%d/%m}), όχι αγορά πριν από αυτά.")
+                    continue
             mom = sg["mom63"] if not pd.isna(sg["mom63"]) else -9
             cands.append((mom, sym, epic, sg))
         cands.sort(key=lambda x: x[0], reverse=True)
@@ -580,7 +646,9 @@ def run() -> int:
                    [today.date(), env, f"{equity:.2f}" if env == "demo" else "", open_now or "-",
                     market_is_ok, " | ".join(actions) or "-"])
         try:   # μόνο καταγραφή: ένα σφάλμα εδώ δεν επηρεάζει τις πραγματικές συναλλαγές
-            say(update_virtual(frames, p, rk, state, sigs, market_is_ok, today))
+            if block or exit_before:
+                earn |= earnings_calendar([s for s in universe if s not in earn], sessions)
+            say(update_virtual(frames, p, rk, state, sigs, market_is_ok, today, earn))
         except Exception as e:
             say(f"⚠️ Εικονικό ημερολόγιο: {type(e).__name__}: {e}")
     title = (f"Bot {env}{' (δοκιμή)' if dry else ''}: " + (f"{len(actions)} κινήσεις" if actions else "καμία κίνηση")

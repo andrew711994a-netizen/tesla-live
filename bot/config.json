@@ -74,6 +74,11 @@
     "use_market_filter": true,
     "max_drawdown_stop": 0.15
   },
+  "earnings": {
+    "_note": "Καμία αγορά αν η εταιρεία βγάζει αποτελέσματα την επόμενη συνεδρίαση (13/10/2026, μετά τη JPM). Δες reports/research_earnings.md.",
+    "block_sessions": 1,
+    "exit_before": false
+  },
   "costs": {
     "per_side": 0.0007,
     "financing_annual": 0.0

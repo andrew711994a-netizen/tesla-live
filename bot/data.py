@@ -57,10 +57,15 @@ def earnings_times(symbol: str, limit: int = 100, tries: int = 3) -> list[pd.Tim
     last_err = None
     for attempt in range(tries):
         try:
-            df = yf.Ticker(symbol).get_earnings_dates(limit=limit)
-            if df is None or df.empty:
-                raise ValueError(f"χωρίς ημερομηνίες αποτελεσμάτων για {symbol}")
-            return sorted(pd.Timestamp(t) for t in df.index)
+            tk = yf.Ticker(symbol)
+            df = tk.get_earnings_dates(limit=limit)
+            if df is not None and not df.empty:
+                return sorted(pd.Timestamp(t) for t in df.index)
+            # Εφεδρικά: μόνο η επόμενη ημερομηνία, χωρίς ώρα (μεσάνυχτα = άγνωστη ώρα)
+            nxt = (tk.calendar or {}).get("Earnings Date") or []
+            if nxt:
+                return sorted(pd.Timestamp(d).tz_localize("America/New_York") for d in nxt)
+            raise ValueError(f"χωρίς ημερομηνίες αποτελεσμάτων για {symbol}")
         except Exception as e:
             last_err = e
             time.sleep(3 * (attempt + 1))
