@@ -362,9 +362,16 @@ def run() -> int:
             (f" · προβλήματα: {', '.join(bad)}" if bad else ""))
         if env == "demo":   # διαγνωστικό: η μορφή του ιστορικού της Capital.com (για τη σωστή τιμή κλεισίματος)
             since = (pd.Timestamp.utcnow() - pd.Timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S")
-            for name, fetch in (("activity", cap.activity), ("transactions", cap.transactions)):
+            now_s = pd.Timestamp.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+            day_ago = (pd.Timestamp.utcnow() - pd.Timedelta(hours=23)).strftime("%Y-%m-%dT%H:%M:%S")
+            tries = (("activity από-έως 2 μέρες", lambda: cap.activity(since, now_s)),
+                     ("activity από-έως 23 ώρες", lambda: cap.activity(day_ago, now_s)),
+                     ("activity lastPeriod", lambda: cap._req("GET", "/history/activity",
+                                                             params={"lastPeriod": 86400, "detailed": "true"}).get("activities", [])),
+                     ("transactions", lambda: cap.transactions(since)))
+            for name, fetch in tries:
                 try:
-                    items = fetch(since)
+                    items = fetch()
                     say(f"Ιστορικό {name}: {len(items)} εγγραφές")
                     for it in items[:12]:
                         say(f"  {name}: {json.dumps(it, ensure_ascii=False)[:400]}")
