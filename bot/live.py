@@ -374,7 +374,7 @@ def run() -> int:
                     items = fetch()
                     say(f"Ιστορικό {name}: {len(items)} εγγραφές")
                     for it in items[:12]:
-                        say(f"  {name}: {json.dumps(it, ensure_ascii=False)[:400]}")
+                        say(f"  {name}: {json.dumps(it, ensure_ascii=False)[:1500]}")
                 except Exception as e:
                     say(f"Ιστορικό {name}: σφάλμα {type(e).__name__}: {str(e)[:200]}")
     epic_to_sym = {v: k for k, v in universe.items()}
