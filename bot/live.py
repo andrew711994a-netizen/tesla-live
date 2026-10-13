@@ -153,6 +153,29 @@ def update_virtual(frames: dict, p: Params, rk: dict, state: dict, sigs: dict, m
     return msg
 
 
+CLOSE_REASONS = {"SL": "Stop", "TP": "Στόχος", "USER": "Χειροκίνητα"}
+
+
+def broker_close(cap, epic: str, opened: str) -> tuple[float, str] | None:
+    """Η πραγματική τιμή και αιτία κλεισίματος μιας θέσης από το ιστορικό της Capital.com.
+
+    Το ιστορικό δέχεται διαστήματα έως μίας μέρας, άρα ψάχνουμε προς τα πίσω, ανά 23 ώρες, ως τη μέρα αγοράς.
+    """
+    end = pd.Timestamp.utcnow().tz_localize(None)
+    stop_at = max(pd.Timestamp(opened), end - pd.Timedelta(days=40))
+    while end > stop_at:
+        start = end - pd.Timedelta(hours=23)
+        acts = cap.activity(start.strftime("%Y-%m-%dT%H:%M:%S"), end.strftime("%Y-%m-%dT%H:%M:%S"))
+        closes = [a for a in acts if a.get("epic") == epic and a.get("type") == "POSITION"
+                  and (a.get("details") or {}).get("direction") == "SELL" and (a.get("details") or {}).get("level")]
+        if closes:
+            last = max(closes, key=lambda a: a.get("dateUTC", ""))
+            src = last.get("source", "")
+            return float(last["details"]["level"]), CLOSE_REASONS.get(src, src or "Άγνωστο")
+        end = start
+    return None
+
+
 def env_flag(name: str, default: bool) -> bool:
     v = os.environ.get(name, "").strip().lower()
     return default if v == "" else v in ("1", "true", "yes", "on")
@@ -360,23 +383,6 @@ def run() -> int:
                 bad.append(f"{sym} ({str(e)[:60]})")
         say(f"Έλεγχος συμβόλων: {len(universe) - len(bad)}/{len(universe)} εντάξει" +
             (f" · προβλήματα: {', '.join(bad)}" if bad else ""))
-        if env == "demo":   # διαγνωστικό: η μορφή του ιστορικού της Capital.com (για τη σωστή τιμή κλεισίματος)
-            since = (pd.Timestamp.utcnow() - pd.Timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S")
-            now_s = pd.Timestamp.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-            day_ago = (pd.Timestamp.utcnow() - pd.Timedelta(hours=23)).strftime("%Y-%m-%dT%H:%M:%S")
-            tries = (("activity από-έως 2 μέρες", lambda: cap.activity(since, now_s)),
-                     ("activity από-έως 23 ώρες", lambda: cap.activity(day_ago, now_s)),
-                     ("activity lastPeriod", lambda: cap._req("GET", "/history/activity",
-                                                             params={"lastPeriod": 86400, "detailed": "true"}).get("activities", [])),
-                     ("transactions", lambda: cap.transactions(since)))
-            for name, fetch in tries:
-                try:
-                    items = fetch()
-                    say(f"Ιστορικό {name}: {len(items)} εγγραφές")
-                    for it in items[:12]:
-                        say(f"  {name}: {json.dumps(it, ensure_ascii=False)[:1500]}")
-                except Exception as e:
-                    say(f"Ιστορικό {name}: σφάλμα {type(e).__name__}: {str(e)[:200]}")
     epic_to_sym = {v: k for k, v in universe.items()}
     actions: list[str] = []
     record = not dry                                    # το ημερολόγιο γράφει μόνο πραγματικές κινήσεις (demo ή live)
@@ -391,10 +397,18 @@ def run() -> int:
     for epic, entry in list(state.items()):
         if epic in live_epics:
             continue
-        # Έκλεισε στην Capital.com από stop ή στόχο: εκτίμηση από τα ημερήσια κεριά
+        # Έκλεισε στην Capital.com από stop ή στόχο: η πραγματική τιμή από το ιστορικό της,
+        # αλλιώς εκτίμηση από τα ημερήσια κεριά (που δεν βλέπουν τις προσυνεδριακές συναλλαγές)
         df = frames.get(entry["symbol"])
         px, why = entry["entry"], "Άγνωστο"
-        if df is not None:
+        try:
+            found = broker_close(cap, epic, entry["date"])
+        except Exception as e:
+            found = None
+            say(f"⚠️ Δεν διάβασα το ιστορικό της Capital.com για τη {entry['symbol']} ({type(e).__name__}): εκτίμηση από τα κεριά.")
+        if found:
+            px, why = found
+        elif df is not None:
             after = df[df.index >= pd.Timestamp(entry["date"])]
             hit_stop = after[after["Low"] <= entry["stop"]]
             hit_tp = after[after["High"] >= entry["tp"]]
