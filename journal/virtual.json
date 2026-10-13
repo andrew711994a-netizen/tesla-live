@@ -1,5 +1,5 @@
 {
- "updated": "2026-10-12",
+ "updated": "2026-10-13",
  "since": "2026-10-07",
  "missing": [],
  "closed": {
@@ -10,31 +10,38 @@
    "symbol": "MRK",
    "date": "2026-10-07",
    "entry": 142.03,
-   "last_close": 145.6,
-   "result_pct": 2.37,
-   "r": 0.49,
+   "last_close": 145.45,
+   "result_pct": 2.27,
+   "r": 0.47,
    "real": true
   },
   {
    "symbol": "ABBV",
    "date": "2026-10-08",
    "entry": 270.98,
-   "last_close": 276.47,
-   "result_pct": 1.88,
-   "r": 0.45,
+   "last_close": 281.12,
+   "result_pct": 3.6,
+   "r": 0.86,
    "real": true
   },
   {
    "symbol": "JNJ",
    "date": "2026-10-08",
    "entry": 256.22,
-   "last_close": 261.44,
-   "result_pct": 1.9,
-   "r": 0.48,
+   "last_close": 263.73,
+   "result_pct": 2.79,
+   "r": 0.71,
+   "real": true
+  },
+  {
+   "symbol": "JPM",
+   "date": "2026-10-12",
+   "entry": 334.3,
+   "last_close": 334.3,
+   "result_pct": -0.14,
+   "r": -0.04,
    "real": true
   }
  ],
- "signals_today": [
-  "JPM"
- ]
+ "signals_today": []
 }

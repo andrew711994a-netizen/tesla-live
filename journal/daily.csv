@@ -3,3 +3,4 @@ date,env,equity_demo,open_positions,market_filter_ok,actions
 2026-10-08,demo,9980.54,MRK:-0.8%;AVGO:-0.2%,True,ΑΓΟΡΑ ABBV (ABBV) · 9.47 μονάδες στα ~271.76 · stop 259.97 (-4.3%) · στόχος 288.45 (+6.1%) · breakout | ΑΓΟΡΑ JNJ (JNJ) · 12.02 μονάδες στα ~257.64 · stop 248.35 (-3.6%) · στόχος 273.61 (+6.2%) · pullback
 2026-10-09,demo,9933.22,MRK:-0.4%;ABBV:+0.1%;JNJ:-0.8%,True,ΚΛΕΙΣΙΜΟ AVGO (6.26) · λόγος: Τάση; 1 μέρες σε θέση
 2026-10-12,demo,10070.34,MRK:+1.6%;ABBV:+1.9%;JNJ:+1.1%,True,ΑΓΟΡΑ JPM (JPM) · 7.8 μονάδες στα ~335.79 · stop 321.36 (-4.3%) · στόχος 350.44 (+4.4%) · pullback
+2026-10-13,demo,9920.74,MRK:+1.1%;ABBV:+3.1%;JNJ:-1.3%,True,-
