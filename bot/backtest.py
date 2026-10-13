@@ -286,7 +286,7 @@ def main() -> None:
            f"Δεδομένα έως {max(df.index[-1] for df in data.values()):%d/%m/%Y}. "
            f"Αρχικό κεφάλαιο 10.000 $ σε κάθε έλεγχο. Μετοχές: {', '.join(symbols)}.", "",
            "## 1. Χαρτοφυλάκιο (όλες οι μετοχές μαζί)", "",
-           f"Ρίσκο {rk['risk_per_trade']:.0%} ανά συναλλαγή, έως {rk['max_positions']} θέσεις, "
+           f"Ρίσκο {rk['risk_per_trade']:.2%} ανά συναλλαγή, έως {rk['max_positions']} θέσεις, "
            f"συνολικό ρίσκο έως {rk['max_total_risk']:.0%}, σύνολο θέσεων έως το κεφάλαιο. "
            f"Κόστος (spread) {real_costs.per_side:.2%} ανά πράξη.", ""]
     summary = {}

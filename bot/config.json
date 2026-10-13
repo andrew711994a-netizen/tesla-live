@@ -67,9 +67,9 @@
     "trend_exit": true
   },
   "risk": {
-    "risk_per_trade": 0.01,
-    "max_positions": 5,
-    "max_total_risk": 0.05,
+    "risk_per_trade": 0.0075,
+    "max_positions": 8,
+    "max_total_risk": 0.06,
     "max_notional": 1.0,
     "use_market_filter": true,
     "max_drawdown_stop": 0.15

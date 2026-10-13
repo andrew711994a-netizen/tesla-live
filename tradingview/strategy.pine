@@ -22,7 +22,7 @@ volMult     = input.float(1.2, "Όγκος πάνω από × μέσου (για
 allowShort  = input.bool(false, "Επιτρέπονται short", group = grpE)
 
 grpR = "Ρίσκο"
-riskPct  = input.float(1.0, "Ρίσκο ανά συναλλαγή (% κεφαλαίου)", minval = 0.1, maxval = 3, step = 0.1, group = grpR)
+riskPct  = input.float(0.75, "Ρίσκο ανά συναλλαγή (% κεφαλαίου)", minval = 0.1, maxval = 3, step = 0.05, group = grpR)
 maxLev   = input.float(1.0, "Μέγιστη μόχλευση (1 = καθόλου)", minval = 0.1, maxval = 5, step = 0.1, group = grpR)
 atrLen   = input.int(14, "Μήκος ATR", group = grpR)
 slAtr    = input.float(2.0, "Stop-loss (× ATR)", minval = 0.5, step = 0.25, group = grpR)
