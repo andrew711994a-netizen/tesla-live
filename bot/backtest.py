@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import bisect
 import json
 import math
 from dataclasses import dataclass
@@ -43,12 +44,25 @@ class Costs:
 
 def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
         start: str, end: str | None = None, market: pd.DataFrame | None = None,
-        initial: float = 10_000.0) -> dict:
+        initial: float = 10_000.0, events: dict[str, list[pd.Timestamp]] | None = None,
+        block: int = 0, exit_before: bool = False) -> dict:
+    """events: οι συνεδριάσεις με αποτελέσματα ανά μετοχή. block: καμία αγορά αν έρχονται αποτελέσματα στις
+    επόμενες block συνεδριάσεις. exit_before: κλείσιμο στο άνοιγμα της συνεδρίασης πριν από τα αποτελέσματα."""
     sigs = {s: signals(df, p) for s, df in data.items()}
     mkt = market_ok(market, p) if (risk.use_market_filter and market is not None) else None
     end_ts = pd.Timestamp(end) if end else None
     dates = sorted(set().union(*[df.index for df in data.values()]))
     dates = [d for d in dates if d >= pd.Timestamp(start) and (end_ts is None or d <= end_ts)]
+    pos_of = {d: i for i, d in enumerate(dates)}
+    ev_idx = {sym: sorted(pos_of[e] for e in evs if e in pos_of) for sym, evs in (events or {}).items()}
+
+    def to_event(sym: str, i: int) -> int | None:
+        """Πόσες συνεδριάσεις μέχρι τα επόμενα αποτελέσματα (μετά τη συνεδρίαση i)."""
+        lst = ev_idx.get(sym)
+        if not lst:
+            return None
+        k = bisect.bisect_right(lst, i)
+        return lst[k] - i if k < len(lst) else None
 
     cash, equity = initial, initial
     positions: dict[str, dict] = {}
@@ -102,6 +116,8 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
             o = row["Open"]
             if not (stop < o < tp) or dist <= 0:
                 continue
+            if block and (n := to_event(s, pos_of[d])) is not None and n <= block:
+                continue
             eq = equity
             qty = eq * risk.risk_per_trade / dist
             notional_used = sum(ps["qty"] * last_close.get(x, ps["entry"]) for x, ps in positions.items())
@@ -135,6 +151,8 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
                 pos["exit_pending"] = "Χρόνος"
             elif p.trend_exit and bool(sigs[s].at[d, "trend_broken"]):
                 pos["exit_pending"] = "Τάση"
+            elif exit_before and (n := to_event(s, pos_of[d])) is not None and n <= 2:
+                pos["exit_pending"] = "Αποτελέσματα"
         for s in data:
             if d in data[s].index:
                 last_close[s] = data[s].at[d, "Close"]

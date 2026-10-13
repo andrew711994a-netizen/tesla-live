@@ -7,7 +7,7 @@ on:
       study:
         description: "Ποια έρευνα"
         type: choice
-        options: [research_plus, research_exits, research_entries, research_ema, research_signals]
+        options: [research_plus, research_exits, research_entries, research_ema, research_signals, research_earnings]
         default: research_plus
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
       - run: pip install -r bot/requirements.txt
       - name: Run research
         run: |
-          case "$STUDY" in research_plus|research_exits|research_entries|research_ema|research_signals) ;; *) echo "Άγνωστη έρευνα: $STUDY"; exit 1;; esac
+          case "$STUDY" in research_plus|research_exits|research_entries|research_ema|research_signals|research_earnings) ;; *) echo "Άγνωστη έρευνα: $STUDY"; exit 1;; esac
           python -m "bot.$STUDY"
           cat "reports/$STUDY.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Save report

@@ -48,3 +48,20 @@ def intraday(symbol: str, interval: str = "1h", period: str = "730d", tries: int
             last_err = e
             time.sleep(5 * (attempt + 1))
     raise RuntimeError(f"Αποτυχία λήψης {symbol} ({interval}): {last_err}")
+
+
+def earnings_times(symbol: str, limit: int = 100, tries: int = 3) -> list[pd.Timestamp]:
+    """Ημερομηνίες και ώρες ανακοίνωσης αποτελεσμάτων (παλιές και επόμενες), ώρα Νέας Υόρκης."""
+    import yfinance as yf
+
+    last_err = None
+    for attempt in range(tries):
+        try:
+            df = yf.Ticker(symbol).get_earnings_dates(limit=limit)
+            if df is None or df.empty:
+                raise ValueError(f"χωρίς ημερομηνίες αποτελεσμάτων για {symbol}")
+            return sorted(pd.Timestamp(t) for t in df.index)
+        except Exception as e:
+            last_err = e
+            time.sleep(3 * (attempt + 1))
+    raise RuntimeError(f"Αποτυχία ημερομηνιών αποτελεσμάτων {symbol}: {last_err}")

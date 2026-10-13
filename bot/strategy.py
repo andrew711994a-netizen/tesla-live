@@ -82,3 +82,29 @@ def market_ok(market_df: pd.DataFrame, p: Params) -> pd.Series:
     """Φίλτρο αγοράς: ο δείκτης είναι πάνω από τον αργό EMA."""
     c = market_df["Close"]
     return (c > _ema(c, p.ema_slow)).fillna(False)
+
+
+def event_sessions(times: list[pd.Timestamp], sessions: pd.DatetimeIndex) -> list[pd.Timestamp]:
+    """Οι συνεδριάσεις όπου «περνούν» τα αποτελέσματα μιας εταιρείας (το πρώτο άνοιγμα μετά την ανακοίνωση).
+
+    Πριν το άνοιγμα (π.χ. 7 π.μ.): η ίδια μέρα. Μετά το κλείσιμο (4 μ.μ.): η επόμενη συνεδρίαση.
+    Άγνωστη ώρα (μεσάνυχτα): και οι δύο, για σιγουριά.
+    """
+    out: set[pd.Timestamp] = set()
+    for t in times:
+        if t.tzinfo is not None:
+            t = t.tz_convert("America/New_York")
+        day = pd.Timestamp(t.date())
+        k = int(sessions.searchsorted(day))
+        if k >= len(sessions):
+            continue
+        same = sessions[k] == day
+        hour = t.hour + t.minute / 60
+        if hour == 0:
+            cand = [k, k + 1] if same else [k]
+        elif hour >= 16:
+            cand = [k + 1] if same else [k]
+        else:
+            cand = [k]
+        out.update(sessions[c] for c in cand if c < len(sessions))
+    return sorted(out)
