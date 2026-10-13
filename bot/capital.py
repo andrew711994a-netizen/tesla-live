@@ -99,6 +99,17 @@ class Capital:
         return self._req("GET", f"/prices/{epic}", params={"resolution": resolution, "max": max_n,
                                                            "from": start, "to": end}).get("prices", [])
 
+    # ── ιστορικό ──
+    def activity(self, start: str, end: str | None = None) -> list[dict]:
+        """Ενέργειες του λογαριασμού (ανοίγματα, κλεισίματα από stop/στόχο κ.λπ.). Ημερομηνίες UTC, YYYY-MM-DDTHH:MM:SS."""
+        params = {"from": start, "detailed": "true"} | ({"to": end} if end else {})
+        return self._req("GET", "/history/activity", params=params).get("activities", [])
+
+    def transactions(self, start: str, end: str | None = None) -> list[dict]:
+        """Χρηματικές κινήσεις (κέρδη/ζημιές κλεισμένων θέσεων κ.λπ.), στο νόμισμα του λογαριασμού."""
+        params = {"from": start} | ({"to": end} if end else {})
+        return self._req("GET", "/history/transactions", params=params).get("transactions", [])
+
     # ── θέσεις ──
     def positions(self) -> list[dict]:
         out = []

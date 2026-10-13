@@ -360,6 +360,16 @@ def run() -> int:
                 bad.append(f"{sym} ({str(e)[:60]})")
         say(f"Έλεγχος συμβόλων: {len(universe) - len(bad)}/{len(universe)} εντάξει" +
             (f" · προβλήματα: {', '.join(bad)}" if bad else ""))
+        if env == "demo":   # διαγνωστικό: η μορφή του ιστορικού της Capital.com (για τη σωστή τιμή κλεισίματος)
+            since = (pd.Timestamp.utcnow() - pd.Timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S")
+            for name, fetch in (("activity", cap.activity), ("transactions", cap.transactions)):
+                try:
+                    items = fetch(since)
+                    say(f"Ιστορικό {name}: {len(items)} εγγραφές")
+                    for it in items[:12]:
+                        say(f"  {name}: {json.dumps(it, ensure_ascii=False)[:400]}")
+                except Exception as e:
+                    say(f"Ιστορικό {name}: σφάλμα {type(e).__name__}: {str(e)[:200]}")
     epic_to_sym = {v: k for k, v in universe.items()}
     actions: list[str] = []
     record = not dry                                    # το ημερολόγιο γράφει μόνο πραγματικές κινήσεις (demo ή live)
