@@ -244,6 +244,9 @@ VARIANTS = [
     # Χαρτοφυλάκιο
     ("6 θέσεις × 1%", {}, {}, {}, {"max_positions": 6, "max_total_risk": 0.06}),
     ("8 θέσεις × 0,75%", {}, {}, {}, {"max_positions": 8, "risk_per_trade": 0.0075, "max_total_risk": 0.06}),
+    # Συνδυασμός των δύο που πέρασαν το πρώτο τρέξιμο
+    ("Σπάσιμο 55 ημερών + 8 θέσεις × 0,75%", {"brk_len": 55}, {}, {},
+     {"max_positions": 8, "risk_per_trade": 0.0075, "max_total_risk": 0.06}),
 ]
 
 # Γειτονικές τιμές: μια πραγματική βελτίωση δεν εξαφανίζεται αν αλλάξει λίγο ο αριθμός
@@ -271,6 +274,13 @@ NEIGHBORS = {
     "Κινούμενο stop 3×ATR, χωρίς στόχο, έως 40 μέρες": [({"max_bars": 40}, {}, {"trail": 2.5, "no_target": True}),
                                                        ({"max_bars": 40}, {}, {"trail": 3.5, "no_target": True})],
     "Stop στην τιμή αγοράς μετά από +1R": [({}, {}, {"breakeven": 0.8}), ({}, {}, {"breakeven": 1.2})],
+    "6 θέσεις × 1%": [({}, {}, {}, {"max_positions": 7, "max_total_risk": 0.07})],
+    "8 θέσεις × 0,75%": [({}, {}, {}, {"max_positions": 7, "risk_per_trade": 0.0085, "max_total_risk": 0.06}),
+                         ({}, {}, {}, {"max_positions": 10, "risk_per_trade": 0.006, "max_total_risk": 0.06})],
+    "Σπάσιμο 55 ημερών + 8 θέσεις × 0,75%": [
+        ({"brk_len": 45}, {}, {}, {"max_positions": 8, "risk_per_trade": 0.0075, "max_total_risk": 0.06}),
+        ({"brk_len": 65}, {}, {}, {"max_positions": 8, "risk_per_trade": 0.0075, "max_total_risk": 0.06}),
+        ({"brk_len": 55}, {}, {}, {"max_positions": 10, "risk_per_trade": 0.006, "max_total_risk": 0.06})],
 }
 
 TESTS = [("A 2016–21", "A", "2016-01-01", "2021-12-31"), ("A 2022–σήμερα", "A", "2022-01-01", None),
@@ -356,11 +366,13 @@ def main() -> None:
                 continue
             vname = next(v for v in VARIANTS if v[0] == n)
             all_ok = True
-            for pchg, ochg, bopt in nb:
-                res = evaluate(pchg, ochg, bopt, vname[4])
+            for item in nb:
+                pchg, ochg, bopt = item[:3]
+                rchg = item[3] if len(item) > 3 else vname[4]
+                res = evaluate(pchg, ochg, bopt, rchg)
                 ok = all(res[t]["sharpe"] >= base[t]["sharpe"] for t, *_ in TESTS)
                 all_ok &= ok
-                desc = ", ".join(f"{k}={v}" for k, v in {**pchg, **ochg, **bopt}.items())
+                desc = ", ".join(f"{k}={v}" for k, v in {**pchg, **ochg, **bopt, **(item[3] if len(item) > 3 else {})}.items())
                 out.append(f"| {n} | {desc} | " + " | ".join(num(res[t]["sharpe"]) for t, *_ in TESTS) +
                            f" | {'ναι' if ok else 'όχι'} |")
                 summary[f"{n} | γείτονας {desc}"] = res
