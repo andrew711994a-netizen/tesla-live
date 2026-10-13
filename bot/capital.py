@@ -33,7 +33,10 @@ class Capital:
                         timeout=20)
         if r.status_code != 200:
             raise CapitalError(f"Αποτυχία σύνδεσης ({r.status_code}): {r.text[:200]}")
-        self.s.headers.update({"CST": r.headers["CST"], "X-SECURITY-TOKEN": r.headers["X-SECURITY-TOKEN"]})
+        cst, token = r.headers.get("CST"), r.headers.get("X-SECURITY-TOKEN")
+        if not cst or not token:
+            raise CapitalError("Η σύνδεση δεν επέστρεψε κλειδιά συνεδρίας (CST/X-SECURITY-TOKEN)")
+        self.s.headers.update({"CST": cst, "X-SECURITY-TOKEN": token})
 
     def _req(self, method: str, path: str, **kw) -> dict:
         for attempt in range(3):

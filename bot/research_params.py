@@ -138,6 +138,7 @@ def run_ext(data, sigs, p: Params, risk: Risk, costs: Costs, start, end=None, ma
             o = row["Open"]
             if not (stop < o < tp) or dist <= 0:
                 continue
+            dist = o - stop   # όπως το bot: το ρίσκο μετριέται από την τιμή αγοράς ως το stop
             eq = equity
             qty = eq * risk.risk_per_trade / dist
             notional_used = sum(ps["qty"] * last_close.get(x, ps["entry"]) for x, ps in positions.items())

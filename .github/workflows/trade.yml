@@ -65,4 +65,9 @@ jobs:
           git add journal/
           git diff --cached --quiet && exit 0
           git commit -m "Journal $(date -u +%F) [skip ci]"
-          for i in 1 2 3; do git pull --rebase origin main && git push origin HEAD:main && break; sleep 5; done
+          for i in 1 2 3; do
+            if git pull --rebase origin main && git push origin HEAD:main; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::Το ημερολόγιο δεν αποθηκεύτηκε στο GitHub (push απέτυχε 3 φορές)."
+          exit 1

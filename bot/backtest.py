@@ -116,6 +116,7 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
             o = row["Open"]
             if not (stop < o < tp) or dist <= 0:
                 continue
+            dist = o - stop   # όπως το bot: το ρίσκο μετριέται από την τιμή αγοράς ως το stop
             if block and (n := to_event(s, pos_of[d])) is not None and n <= block:
                 continue
             eq = equity

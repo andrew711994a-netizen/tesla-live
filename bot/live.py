@@ -79,7 +79,7 @@ def append_csv(name: str, header: str, row: list) -> None:
     with f.open("a", encoding="utf-8") as fh:
         if new:
             fh.write(header + "\n")
-        fh.write(",".join(str(x).replace(",", ";") for x in row) + "\n")
+        fh.write(",".join(str(x).replace(",", ";").replace("\r", " ").replace("\n", " ") for x in row) + "\n")
 
 
 def log_trade(entry: dict, exit_date, exit_px: float, reason: str, env: str) -> None:
@@ -159,22 +159,27 @@ def update_virtual(frames: dict, p: Params, rk: dict, state: dict, sigs: dict, m
 CLOSE_REASONS = {"SL": "Stop", "TP": "Στόχος", "USER": "Χειροκίνητα"}
 
 
-def broker_close(cap, epic: str, opened: str) -> tuple[float, str] | None:
-    """Η πραγματική τιμή και αιτία κλεισίματος μιας θέσης από το ιστορικό της Capital.com.
+def broker_close(cap, epic: str, opened: str, deal_id: str | None = None) -> tuple[float, str, str] | None:
+    """Η πραγματική τιμή, αιτία και μέρα κλεισίματος μιας θέσης από το ιστορικό της Capital.com.
 
     Το ιστορικό δέχεται διαστήματα έως μίας μέρας, άρα ψάχνουμε προς τα πίσω, ανά 23 ώρες, ως τη μέρα αγοράς.
+    Αν ξέρουμε τον αριθμό της θέσης (deal_id), κρατάμε μόνο το δικό της κλείσιμο.
     """
-    end = pd.Timestamp.utcnow().tz_localize(None)
-    stop_at = max(pd.Timestamp(opened), end - pd.Timedelta(days=40))
+    end = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    opened_ts = pd.Timestamp(opened)
+    stop_at = max(opened_ts, end - pd.Timedelta(days=40))
     while end > stop_at:
-        start = end - pd.Timedelta(hours=23)
+        start = max(end - pd.Timedelta(hours=23), opened_ts)
         acts = cap.activity(start.strftime("%Y-%m-%dT%H:%M:%S"), end.strftime("%Y-%m-%dT%H:%M:%S"))
         closes = [a for a in acts if a.get("epic") == epic and a.get("type") == "POSITION"
-                  and (a.get("details") or {}).get("direction") == "SELL" and (a.get("details") or {}).get("level")]
+                  and (a.get("details") or {}).get("direction") == "SELL" and (a.get("details") or {}).get("level")
+                  and pd.Timestamp(a.get("dateUTC") or a.get("date") or end) >= opened_ts
+                  and (deal_id is None or a.get("dealId") == deal_id)]
         if closes:
             last = max(closes, key=lambda a: a.get("dateUTC", ""))
             src = last.get("source", "")
-            return float(last["details"]["level"]), CLOSE_REASONS.get(src, src or "Άγνωστο")
+            when = pd.Timestamp(last.get("dateUTC") or last.get("date")).tz_localize("UTC").tz_convert(NY)
+            return float(last["details"]["level"]), CLOSE_REASONS.get(src, src or "Άγνωστο"), str(when.date())
         end = start
     return None
 
@@ -219,6 +224,11 @@ def env_flag(name: str, default: bool) -> bool:
     return default if v == "" else v in ("1", "true", "yes", "on")
 
 
+def dry_flag() -> bool:
+    """Λειτουργία δοκιμής: σβήνει ΜΟΝΟ με ρητό false/0/no/off· οποιοδήποτε άλλο (ή λάθος) γράψιμο = δοκιμή."""
+    return os.environ.get("DRY_RUN", "").strip().lower() not in ("0", "false", "no", "off")
+
+
 def fx_rate(src: str, dst: str) -> float:
     if src == dst:
         return 1.0
@@ -251,7 +261,7 @@ def write_run_log(status: str) -> None:
     """
     JOURNAL.mkdir(exist_ok=True)
     stamp = datetime.now(NY).strftime("%Y-%m-%d %H:%M")
-    dry = env_flag("DRY_RUN", True)
+    dry = dry_flag()
     name, kind = ("last_dry_run.md", "δοκιμή") if dry else ("last_run.md", "εκτέλεση")
     (JOURNAL / name).write_text(f"# Τελευταία {kind} {stamp} (Νέα Υόρκη) · {status}\n\n" +
                                 "\n".join(f"- {line}" for line in LOG) + "\n", encoding="utf-8")
@@ -288,8 +298,11 @@ def run() -> int:
     if env == "live" and os.environ.get("ALLOW_LIVE") != "I_UNDERSTAND_THE_RISK":
         say("Άρνηση: ο live λογαριασμός χρειάζεται ALLOW_LIVE=I_UNDERSTAND_THE_RISK.")
         return 1
-    dry = env_flag("DRY_RUN", True)
+    dry = dry_flag()
     force = env_flag("FORCE", False)
+    if env == "live":   # χωριστό ημερολόγιο για τον πραγματικό λογαριασμό
+        global JOURNAL
+        JOURNAL = JOURNAL / "live"
     now = datetime.now(NY)
     trade_at = now.replace(hour=TRADE_AT[0], minute=TRADE_AT[1], second=0, microsecond=0)
     if not force:
@@ -411,7 +424,8 @@ def run() -> int:
             f"λογαριασμοί {acc['n_accounts']} · τρέχων: {'ναι' if acc['is_current'] else 'όχι'}")
     for ps in positions:   # κάθε θέση του bot πρέπει να έχει stop-loss και στόχο καταχωρημένα στην Capital.com
         px = float(ps["bid"] or ps["level"])
-        say(f"Θέση {ps['epic']} @ {ps['level']:.2f} · τώρα {px:.2f} ({(px / ps['level'] - 1) * 100:+.1f}%) · "
+        chg = (px / ps["level"] - 1) * 100 if ps["level"] else 0.0
+        say(f"Θέση {ps['epic']} @ {ps['level']:.2f} · τώρα {px:.2f} ({chg:+.1f}%) · "
             f"stop {ps['stop'] if ps['stop'] is not None else '—'} · στόχος {ps['tp'] if ps['tp'] is not None else '—'}")
         if ps["stop"] is None or ps["tp"] is None:
             missing = " και ".join(n for n, v in (("stop-loss", ps["stop"]), ("στόχο", ps["tp"])) if v is None)
@@ -449,6 +463,17 @@ def run() -> int:
             save_state(meta)
 
     live_epics = {ps["epic"] for ps in positions}
+    if record and state and not set(state) <= live_epics:
+        # Η Capital.com δεν έδειξε κάποιες θέσεις του ημερολογίου: ξαναρωτάμε μία φορά (προσωρινό κενό απάντησης)
+        time.sleep(5)
+        try:
+            all_positions = cap.positions()
+            positions = [ps for ps in all_positions if ps["epic"] in universe.values()]
+            live_epics = {ps["epic"] for ps in positions}
+        except Exception as e:
+            say(f"⚠️ Δεύτερη ανάγνωση θέσεων απέτυχε ({type(e).__name__}).")
+    unverified: list[str] = []          # λείπουν από την Capital.com χωρίς απόδειξη κλεισίματος
+    closed_today: set[str] = set()      # έκλεισαν στην Capital.com πριν το σημερινό άνοιγμα (π.χ. stop)
     for epic, entry in list(state.items()):
         if epic in live_epics:
             continue
@@ -456,13 +481,16 @@ def run() -> int:
         # αλλιώς εκτίμηση από τα ημερήσια κεριά (που δεν βλέπουν τις προσυνεδριακές συναλλαγές)
         df = frames.get(entry["symbol"])
         px, why = entry["entry"], "Άγνωστο"
+        close_day = today.date()
         try:
-            found = broker_close(cap, epic, entry["date"])
+            found = broker_close(cap, epic, entry["date"], entry.get("deal_id"))
         except Exception as e:
             found = None
             say(f"⚠️ Δεν διάβασα το ιστορικό της Capital.com για τη {entry['symbol']} ({type(e).__name__}): εκτίμηση από τα κεριά.")
         if found:
-            px, why = found
+            px, why, close_day = found
+            if close_day == str(today.date()):
+                closed_today.add(entry["symbol"])
         elif df is not None:
             after = df[df.index >= pd.Timestamp(entry["date"])]
             hit_stop = after[after["Low"] <= entry["stop"]]
@@ -473,14 +501,35 @@ def run() -> int:
                 px, why = entry["stop"], "Stop"
             elif first_tp is not None:
                 px, why = entry["tp"], "Στόχος"
-            elif len(after):
-                px, why = float(after["Close"].iloc[-1]), "Άγνωστο (εκτίμηση)"
-        log_trade(entry, today.date(), px, why, env)
+        if not found and why not in ("Stop", "Στόχος"):
+            # Καμία απόδειξη ότι έκλεισε: δεν τη σβήνουμε από το ημερολόγιο και δεν ανοίγουμε νέες θέσεις σήμερα
+            unverified.append(entry["symbol"])
+            say(f"⚠️ Η {entry['symbol']} δεν φαίνεται στην Capital.com, αλλά δεν βρέθηκε κλείσιμο. Τη κρατώ στο ημερολόγιο.")
+            continue
+        log_trade(entry, close_day, px, why, env)
         say(f"Έκλεισε στην Capital.com: {entry['symbol']} · {why} · {(px / entry['entry'] - 1) * 100:+.1f}%")
         state.pop(epic)
         persist()
 
+    if unverified:
+        warnings.append(f"⚠️ Θέσεις του ημερολογίου που δεν φαίνονται στην Capital.com: {', '.join(unverified)}. "
+                        "Καμία νέα αγορά σήμερα· έλεγξε την εφαρμογή.")
+
+    def adopt(broker_positions: list[dict]) -> None:
+        """Θέση του bot στην Capital.com χωρίς εγγραφή (π.χ. διακοπή δικτύου μετά την εντολή): μπαίνει στο ημερολόγιο."""
+        for ps in broker_positions:
+            if record and ps["epic"] not in state:
+                created = pd.Timestamp(ps["created"]) if ps["created"] else today
+                state[ps["epic"]] = {"symbol": epic_to_sym[ps["epic"]], "date": str(created.date()),
+                                     "entry": float(ps["level"]), "stop": float(ps["stop"] or ps["level"]),
+                                     "tp": float(ps["tp"] or ps["level"]), "kind": "", "deal_id": ps["deal_id"]}
+                persist()
+                say(f"⚠️ Η θέση {ps['epic']} υπάρχει στην Capital.com χωρίς εγγραφή στο ημερολόγιο: την πρόσθεσα.")
+
+    adopt(positions)
+
     # 3) Έξοδοι λόγω χρόνου ή σπασμένης τάσης (stop και στόχος είναι ήδη στην Capital.com)
+    uncertain = False
     for ps in positions:
         sym = epic_to_sym[ps["epic"]]
         sg = sigs.get(sym)
@@ -504,15 +553,27 @@ def run() -> int:
                 if ps["epic"] in state:
                     log_trade(state.pop(ps["epic"]), today.date(), exit_px, reason, env)
                     persist()
-            except CapitalError as e:
-                msg += f" · ΑΠΕΤΥΧΕ: {e}"
+            except Exception as e:   # και σφάλμα δικτύου: δεν ξέρουμε αν έκλεισε, άρα όχι νέες αγορές σήμερα
+                msg += f" · ΑΠΕΤΥΧΕ: {type(e).__name__}: {e}"
+                uncertain = True
         actions.append(msg)
         say(msg)
     closed = {a.split()[1] for a in actions if a.startswith("ΚΛΕΙΣΙΜΟ") and "ΑΠΕΤΥΧΕ" not in a}
     still_open = [ps for ps in positions if epic_to_sym[ps["epic"]] not in closed]
+    if closed and not dry:   # τα χρήματα που ελευθερώθηκαν από τα σημερινά κλεισίματα μετράνε για τις αγορές
+        try:
+            fresh = cap.account()
+            if fresh["equity"] > 0:
+                acc, equity = fresh, fresh["equity"]
+        except Exception as e:
+            say(f"⚠️ Δεν ξαναδιάβασα τον λογαριασμό μετά τα κλεισίματα ({type(e).__name__}).")
+    closed |= closed_today   # όπως το backtest: όχι ξανά αγορά τη μέρα που έκλεισε (και από stop πριν το άνοιγμα)
 
     # 4) Όρια προστασίας
-    allow_new = True
+    allow_new = not unverified and not uncertain
+    if uncertain:
+        say("⚠️ Ένα κλείσιμο δεν επιβεβαιώθηκε: καμία νέα αγορά σήμερα.")
+        warnings.append("⚠️ Ένα κλείσιμο δεν επιβεβαιώθηκε (σφάλμα δικτύου). Έλεγξε τις θέσεις στην εφαρμογή.")
     # Το bot ΔΕΝ αλλάζει ρυθμίσεις λογαριασμού: μόνο ελέγχει ότι η μόχλευση είναι 1:1
     # (χωρίς 1:1 η Capital.com χρεώνει χρέωση νύχτας και η στρατηγική δεν βγαίνει).
     for asset, want in CONFIG.get("leverage", {}).items():
@@ -553,7 +614,8 @@ def run() -> int:
         try:
             for ps in still_open:
                 r = to_acc(ps.get("currency") or cap.market(ps["epic"])["currency"])
-                risk_used += abs(ps["level"] - float(ps["stop"] or ps["level"])) * ps["size"] * r
+                # χωρίς stop: όλη η αξία της θέσης θεωρείται ρίσκο
+                risk_used += (abs(ps["level"] - float(ps["stop"])) if ps["stop"] is not None else ps["level"]) * ps["size"] * r
                 notional_used += float(ps["bid"] or ps["level"]) * ps["size"] * r
         except Exception as e:
             allow_new = False
@@ -581,6 +643,11 @@ def run() -> int:
         cands.sort(key=lambda x: x[0], reverse=True)
         n_open = len(still_open)
         available = acc["available"] * 0.98            # λίγο περιθώριο για spread και συναλλάγματα
+        if dry:   # στη δοκιμή τα κλεισίματα δεν γίνονται: προσθέτουμε την αξία που θα ελευθέρωναν
+            for ps in positions:
+                if epic_to_sym[ps["epic"]] in closed:
+                    cur = ps.get("currency") or cap.market(ps["epic"])["currency"]
+                    available += float(ps["bid"] or ps["level"]) * ps["size"] * to_acc(cur) * 0.98
         for _, sym, epic, sg in cands:
             if n_open >= rk["max_positions"]:
                 say(f"Παράλειψη {sym}: έχουμε ήδη {n_open} θέσεις (όριο {rk['max_positions']}).")
@@ -617,20 +684,35 @@ def run() -> int:
                 continue
             msg = (f"ΑΓΟΡΑ {sym} ({epic}) · {size} μονάδες στα ~{price:.2f} · stop {stop:.2f} "
                    f"({(stop / price - 1) * 100:+.1f}%) · στόχος {tp:.2f} ({(tp / price - 1) * 100:+.1f}%) · {sg['kind']}")
+            ok = True
             if not dry:
                 try:
                     conf = cap.open(epic, size, stop, tp)
+                    deal = next((d.get("dealId") for d in conf.get("affectedDeals") or [] if d.get("dealId")),
+                                conf.get("dealId"))
                     state[epic] = {"symbol": sym, "date": str(today.date()), "entry": float(conf.get("level") or price),
-                                   "stop": stop, "tp": tp, "kind": sg["kind"]}
+                                   "stop": stop, "tp": tp, "kind": sg["kind"], "deal_id": deal}
                     persist()
-                except CapitalError as e:
+                except CapitalError as e:      # η Capital.com απέρριψε την εντολή: δεν δεσμεύει χρήματα
                     msg += f" · ΑΠΕΤΥΧΕ: {e}"
+                    ok = False
+                except Exception as e:
+                    # Σφάλμα δικτύου: ίσως άνοιξε. Αν άνοιξε, μπαίνει αμέσως στο ημερολόγιο· μετά η εκτέλεση
+                    # σταματά ως αποτυχημένη, ώστε η επόμενη εκκίνηση να ξαναδοκιμάσει (βλέπει τις θέσεις, χωρίς διπλές)
+                    say(f"{msg} · ΑΠΕΤΥΧΕ: {type(e).__name__}: {e}")
+                    try:
+                        time.sleep(3)
+                        adopt([ps for ps in cap.positions() if ps["epic"] in universe.values()])
+                    except Exception as e2:
+                        say(f"⚠️ Δεν ξαναδιάβασα τις θέσεις ({type(e2).__name__}).")
+                    raise RuntimeError(f"άγνωστη έκβαση εντολής για {sym}: {type(e).__name__}") from e
             actions.append(msg)
             say(msg)
-            n_open += 1
-            risk_used += dist * size * rate
-            notional_used += price * size * rate
-            available -= price * size * rate
+            if ok:
+                n_open += 1
+                risk_used += dist * size * rate
+                notional_used += price * size * rate
+                available -= price * size * rate
 
     if not actions:
         say("Καμία κίνηση σήμερα.")
