@@ -1,35 +1,47 @@
 {
- "updated": "2026-10-14",
+ "updated": "2026-10-15",
  "since": "2026-10-07",
  "missing": [],
  "closed": {
   "trades": 1,
   "win": 0.0,
-  "avg_r": -1.0448548703894593,
-  "avg_pct": -0.03211065701733854,
-  "total_r": -1.0448548703894593
+  "avg_r": -1.0448548703979983,
+  "avg_pct": -0.03211065701158202,
+  "total_r": -1.0448548703979983
  },
  "open": [
   {
    "symbol": "MRK",
    "date": "2026-10-07",
    "entry": 142.03,
-   "last_close": 141.98,
-   "result_pct": -0.18,
-   "r": -0.04,
+   "last_close": 147.37,
+   "result_pct": 3.62,
+   "r": 0.74,
    "real": true
   },
   {
    "symbol": "ABBV",
    "date": "2026-10-08",
    "entry": 270.98,
-   "last_close": 274.36,
-   "result_pct": 1.11,
-   "r": 0.27,
+   "last_close": 283.48,
+   "result_pct": 4.47,
+   "r": 1.1,
+   "real": true
+  },
+  {
+   "symbol": "MA",
+   "date": "2026-10-14",
+   "entry": 605.5,
+   "last_close": 603.24,
+   "result_pct": -0.51,
+   "r": -0.15,
    "real": true
   }
  ],
  "signals_today": [
-  "MA"
+  "JNJ",
+  "JPM",
+  "PFE",
+  "PG"
  ]
 }
