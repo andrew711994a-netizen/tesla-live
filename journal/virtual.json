@@ -1,47 +1,65 @@
 {
- "updated": "2026-10-15",
+ "updated": "2026-10-16",
  "since": "2026-10-07",
  "missing": [],
  "closed": {
-  "trades": 1,
-  "win": 0.0,
-  "avg_r": -1.0448548703979983,
-  "avg_pct": -0.03211065701158202,
-  "total_r": -1.0448548703979983
+  "trades": 3,
+  "win": 0.6666666666666666,
+  "avg_r": 0.6964554424424981,
+  "avg_pct": 0.03585434713305364,
+  "total_r": 2.0893663273274945
  },
  "open": [
-  {
-   "symbol": "MRK",
-   "date": "2026-10-07",
-   "entry": 142.03,
-   "last_close": 147.37,
-   "result_pct": 3.62,
-   "r": 0.74,
-   "real": true
-  },
-  {
-   "symbol": "ABBV",
-   "date": "2026-10-08",
-   "entry": 270.98,
-   "last_close": 283.48,
-   "result_pct": 4.47,
-   "r": 1.1,
-   "real": true
-  },
   {
    "symbol": "MA",
    "date": "2026-10-14",
    "entry": 605.5,
-   "last_close": 603.24,
-   "result_pct": -0.51,
+   "last_close": 616.32,
+   "result_pct": 1.65,
+   "r": 0.48,
+   "real": true
+  },
+  {
+   "symbol": "JNJ",
+   "date": "2026-10-15",
+   "entry": 257.11,
+   "last_close": 253.28,
+   "result_pct": -1.63,
+   "r": -0.27,
+   "real": true
+  },
+  {
+   "symbol": "JPM",
+   "date": "2026-10-15",
+   "entry": 337.25,
+   "last_close": 335.53,
+   "result_pct": -0.65,
    "r": -0.15,
+   "real": true
+  },
+  {
+   "symbol": "PFE",
+   "date": "2026-10-15",
+   "entry": 29.57,
+   "last_close": 29.44,
+   "result_pct": -0.58,
+   "r": -0.12,
+   "real": true
+  },
+  {
+   "symbol": "PG",
+   "date": "2026-10-15",
+   "entry": 158.33,
+   "last_close": 157.08,
+   "result_pct": -0.93,
+   "r": -0.22,
    "real": true
   }
  ],
  "signals_today": [
-  "JNJ",
-  "JPM",
-  "PFE",
-  "PG"
+  "KO",
+  "LLY",
+  "UNH",
+  "V"
  ]
 }
