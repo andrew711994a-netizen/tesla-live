@@ -45,9 +45,15 @@ class Costs:
 def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
         start: str, end: str | None = None, market: pd.DataFrame | None = None,
         initial: float = 10_000.0, events: dict[str, list[pd.Timestamp]] | None = None,
-        block: int = 0, exit_before: bool = False) -> dict:
+        block: int = 0, exit_before: bool = False, tp_shift: float = 0.0, stop_shift: float = 0.0,
+        broker_adj: float = 0.0) -> dict:
     """events: οι συνεδριάσεις με αποτελέσματα ανά μετοχή. block: καμία αγορά αν έρχονται αποτελέσματα στις
-    επόμενες block συνεδριάσεις. exit_before: κλείσιμο στο άνοιγμα της συνεδρίασης πριν από τα αποτελέσματα."""
+    επόμενες block συνεδριάσεις. exit_before: κλείσιμο στο άνοιγμα της συνεδρίασης πριν από τα αποτελέσματα.
+    tp_shift/stop_shift: η Capital.com κλείνει στόχο και stop όταν η τιμή πώλησης (bid) φτάσει το επίπεδο, και
+    το bid είναι λίγο κάτω από τις τιμές του Yahoo. Με αυτά ο στόχος πιάνεται όταν το υψηλό του Yahoo φτάσει
+    tp·(1+tp_shift) και το stop όταν το χαμηλό πέσει στο stop·(1+stop_shift), και η πώληση γίνεται ακριβώς στο
+    επίπεδο (το spread είναι ήδη μέσα στο bid). 0 και τα δύο = άγγιγμα στο Yahoo και κόστος spread (παλιό backtest).
+    broker_adj: μόνο για έρευνα· stop και στόχος καταχωρούνται στην Capital.com τόσο % πιο χαμηλά."""
     sigs = {s: signals(df, p) for s, df in data.items()}
     mkt = market_ok(market, p) if (risk.use_market_filter and market is not None) else None
     end_ts = pd.Timestamp(end) if end else None
@@ -73,10 +79,13 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
     prev_d = None
     days_invested = 0
 
-    def close_pos(s: str, px: float, d, reason: str):
+    bid_fill = bool(tp_shift or stop_shift)
+
+    def close_pos(s: str, px: float, d, reason: str, at_level: bool = False):
+        """at_level: πώληση στο επίπεδο stop/στόχου της Capital.com, που είναι ήδη τιμή bid (χωρίς άλλο spread)."""
         nonlocal cash
         pos = positions.pop(s)
-        exit_cost = pos["qty"] * px * costs.per_side
+        exit_cost = 0.0 if at_level else pos["qty"] * px * costs.per_side
         cash += pos["qty"] * px - exit_cost
         pnl = pos["qty"] * (px - pos["entry"]) - pos["entry_cost"] - exit_cost - pos["fin"]
         trades.append({"symbol": s, "entry_date": pos["entry_date"], "exit_date": d,
@@ -89,11 +98,11 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
         if pos["entry_date"] != d and o <= pos["stop"]:
             close_pos(s, o, d, "Stop"); return True
         if l <= pos["stop"]:
-            close_pos(s, pos["stop"], d, "Stop"); return True
+            close_pos(s, pos["stop_lvl"], d, "Stop", bid_fill); return True
         if pos["entry_date"] != d and o >= pos["tp"]:
             close_pos(s, o, d, "Στόχος"); return True
         if h >= pos["tp"]:
-            close_pos(s, pos["tp"], d, "Στόχος"); return True
+            close_pos(s, pos["tp_lvl"], d, "Στόχος", bid_fill); return True
         return False
 
     for d in dates:
@@ -129,7 +138,9 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
                 continue
             entry_cost = qty * o * costs.per_side
             cash -= qty * o + entry_cost
-            positions[s] = {"qty": qty, "entry": o, "stop": stop, "tp": tp, "dist": dist,
+            stop_b, tp_b = stop * (1 - broker_adj), tp * (1 - broker_adj)   # επίπεδα στην Capital.com
+            positions[s] = {"qty": qty, "entry": o, "stop": stop_b * (1 + stop_shift), "tp": tp_b * (1 + tp_shift),
+                            "stop_lvl": stop_b, "tp_lvl": tp_b, "dist": dist,
                             "entry_date": d, "entry_cost": entry_cost, "fin": 0.0,
                             "bars": 0, "exit_pending": ""}
             check_intraday(s, row, d)
