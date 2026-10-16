@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -136,6 +137,23 @@ def shifts(m: dict, which: str = "median") -> tuple[float, float]:
     return 1 / (1 + hi) - 1, 1 / (1 + lo) - 1
 
 
+def day_sampler(m: dict, seed: int):
+    """Απόκλιση ανά μέρα όπως στη μέτρηση: για κάθε (μετοχή, μέρα) μια τυχαία αλλά σταθερή τιμή από την κατανομή
+    (10%–90%· τα άκρα κόβονται εκεί, άρα αν κάτι το αποτέλεσμα είναι λίγο αισιόδοξο)."""
+    qs = [0.1, 0.25, 0.5, 0.75, 0.9]
+    hi = [m["hi_all"][k] for k in ("p10", "p25", "median", "p75", "p90")]
+    lo = [m["lo_all"][k] for k in ("p10", "p25", "median", "p75", "p90")]
+
+    def u(key: str) -> float:
+        return (zlib.crc32(key.encode()) % 1_000_003) / 1_000_003
+
+    def f(sym: str, day) -> tuple[float, float]:
+        k = f"{sym}|{day:%Y%m%d}|{seed}"
+        h, l = float(np.interp(u(k + "h"), qs, hi)), float(np.interp(u(k + "l"), qs, lo))
+        return 1 / (1 + h) - 1, 1 / (1 + l) - 1
+    return f
+
+
 # ───────────── 2. Backtest στα τρία τεστ ─────────────
 def main() -> None:
     m = measure()
@@ -177,6 +195,8 @@ def main() -> None:
         variants += [(f"Μετρημένο (στόχος +{fp(ts)}, stop +{fp(ss)})", {"tp_shift": ts, "stop_shift": ss}),
                      (f"Μετρημένο, χειρότερο τέταρτο (στόχος +{fp(ts75)}, stop +{fp(ss75)})",
                       {"tp_shift": ts75, "stop_shift": ss75})]
+        variants.append(("Μετρημένο, διαφορετική απόκλιση κάθε μέρα όπως στη μέτρηση (μέσος όρος 3 σειρών)",
+                         {"day_fill": "sampled"}))
         for adj in (0.001, 0.002, 0.004):
             variants.append((f"Μετρημένο + stop/στόχος {fp(adj, 1)} πιο χαμηλά στην Capital.com",
                              {"tp_shift": ts, "stop_shift": ss, "broker_adj": adj}))
@@ -195,7 +215,11 @@ def main() -> None:
             out[label] = st
         return out
 
-    summary = {name: evaluate(kw) for name, kw in variants}
+    def evaluate_sampled() -> dict:
+        runs = [evaluate({"day_fill": day_sampler(m, seed)}) for seed in (1, 2, 3)]
+        return {t: {k: float(np.mean([r[t][k] for r in runs])) for k in runs[0][t]} for t in runs[0]}
+
+    summary = {name: (evaluate_sampled() if kw.get("day_fill") == "sampled" else evaluate(kw)) for name, kw in variants}
     for name, r in summary.items():
         print(name, {k: round(v["sharpe"], 2) for k, v in r.items()})
 
@@ -252,6 +276,11 @@ def main() -> None:
                 "- Με τη μετρημένη συμπεριφορά της Capital.com, σε σχέση με το παλιό backtest, το μέσο R ανά σήμα "
                 "αλλάζει κατά " + ", ".join(f"{t}: {v:+.3f}".replace(".", ",") for t, v in dr.items()) +
                 " και η απόδοση του χαρτοφυλακίου ανά έτος κατά " + ", ".join(f"{t}: {pct(v)}" for t, v in d.items()) + "."]
+        smp = next((summary[n] for n, kw in variants if kw.get("day_fill")), None)
+        if smp:
+            out.append("- Με διαφορετική απόκλιση κάθε μέρα (π.χ. stop που πιάνεται πριν το άνοιγμα), το μέσο R ανά "
+                       "σήμα είναι " + ", ".join(f"{t}: {smp[t]['every_avg_r']:.3f}".replace(".", ",") for t, *_ in TESTS) +
+                       " και η απόδοση ανά έτος " + ", ".join(f"{t}: {pct(smp[t]['cagr'])}" for t, *_ in TESTS) + ".")
         adj = [(n, summary[n]) for n, kw in variants if kw.get("broker_adj")]
         better = [n for n, r in adj if all(r[t]["every_avg_r"] - real[t]["every_avg_r"] >= 0.01
                                            and r[t]["sharpe"] - real[t]["sharpe"] >= 0.05 for t, *_ in TESTS)]

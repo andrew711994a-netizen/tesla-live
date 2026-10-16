@@ -101,7 +101,7 @@ def update_virtual(frames: dict, p: Params, rk: dict, state: dict, sigs: dict, m
     κάθε μέρα από τα ημερήσια κεριά με τους κανόνες του backtest (είσοδος στο άνοιγμα, stop/στόχος, 20 μέρες,
     σπασμένη τάση, κόστη), οπότε δεν χάνει μέρες ούτε μετρά κάτι δύο φορές.
     """
-    from .backtest import Costs, Risk, every_signal, run as replay, trade_stats
+    from .backtest import Costs, Risk, every_signal, fills, run as replay, trade_stats
 
     market = frames.get(CONFIG["market_symbol"])
     days_log = JOURNAL / "daily.csv"
@@ -115,7 +115,8 @@ def update_virtual(frames: dict, p: Params, rk: dict, state: dict, sigs: dict, m
     ec = CONFIG.get("earnings", {})
     events = {k: v for k, v in (earn or {}).items() if v is not None}
     trades = replay(data, p, risk, Costs(**CONFIG["costs"]), str(start.date()), market=market, events=events,
-                    block=int(ec.get("block_sessions", 0)), exit_before=bool(ec.get("exit_before", False)))["trades"]
+                    block=int(ec.get("block_sessions", 0)), exit_before=bool(ec.get("exit_before", False)),
+                    **fills())["trades"]
 
     real = {(v["symbol"], v["date"]) for v in state.values()}  # ό,τι αγόρασε πραγματικά το bot
     if (JOURNAL / "trades.csv").exists():

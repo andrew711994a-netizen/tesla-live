@@ -42,18 +42,26 @@ class Costs:
     financing_annual: float = 0.08
 
 
+def fills() -> dict:
+    """Πώς εκτελεί η Capital.com στόχο και stop σε σχέση με τις τιμές του Yahoo (config "fills", μετρημένο στο
+    reports/research_fills.md). Το χρησιμοποιούν το backtest και το εικονικό ημερολόγιο του bot."""
+    f = CONFIG.get("fills", {})
+    return {"tp_shift": float(f.get("tp_shift", 0.0)), "stop_shift": float(f.get("stop_shift", 0.0))}
+
+
 def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
         start: str, end: str | None = None, market: pd.DataFrame | None = None,
         initial: float = 10_000.0, events: dict[str, list[pd.Timestamp]] | None = None,
         block: int = 0, exit_before: bool = False, tp_shift: float = 0.0, stop_shift: float = 0.0,
-        broker_adj: float = 0.0) -> dict:
+        broker_adj: float = 0.0, day_fill=None) -> dict:
     """events: οι συνεδριάσεις με αποτελέσματα ανά μετοχή. block: καμία αγορά αν έρχονται αποτελέσματα στις
     επόμενες block συνεδριάσεις. exit_before: κλείσιμο στο άνοιγμα της συνεδρίασης πριν από τα αποτελέσματα.
     tp_shift/stop_shift: η Capital.com κλείνει στόχο και stop όταν η τιμή πώλησης (bid) φτάσει το επίπεδο, και
     το bid είναι λίγο κάτω από τις τιμές του Yahoo. Με αυτά ο στόχος πιάνεται όταν το υψηλό του Yahoo φτάσει
     tp·(1+tp_shift) και το stop όταν το χαμηλό πέσει στο stop·(1+stop_shift), και η πώληση γίνεται ακριβώς στο
     επίπεδο (το spread είναι ήδη μέσα στο bid). 0 και τα δύο = άγγιγμα στο Yahoo και κόστος spread (παλιό backtest).
-    broker_adj: μόνο για έρευνα· stop και στόχος καταχωρούνται στην Capital.com τόσο % πιο χαμηλά."""
+    broker_adj: μόνο για έρευνα· stop και στόχος καταχωρούνται στην Capital.com τόσο % πιο χαμηλά.
+    day_fill: μόνο για έρευνα· (μετοχή, μέρα) → (tp_shift, stop_shift) εκείνης της μέρας, αντί για σταθερά."""
     sigs = {s: signals(df, p) for s, df in data.items()}
     mkt = market_ok(market, p) if (risk.use_market_filter and market is not None) else None
     end_ts = pd.Timestamp(end) if end else None
@@ -79,7 +87,7 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
     prev_d = None
     days_invested = 0
 
-    bid_fill = bool(tp_shift or stop_shift)
+    bid_fill = bool(tp_shift or stop_shift or day_fill)
 
     def close_pos(s: str, px: float, d, reason: str, at_level: bool = False):
         """at_level: πώληση στο επίπεδο stop/στόχου της Capital.com, που είναι ήδη τιμή bid (χωρίς άλλο spread)."""
@@ -95,13 +103,17 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
     def check_intraday(s: str, row, d) -> bool:
         pos = positions[s]
         o, h, l = row["Open"], row["High"], row["Low"]
-        if pos["entry_date"] != d and o <= pos["stop"]:
+        stop_t, tp_t = pos["stop"], pos["tp"]   # πού πρέπει να φτάσει το Yahoo για να εκτελεστούν
+        if day_fill is not None:
+            ts_d, ss_d = day_fill(s, d)
+            stop_t, tp_t = pos["stop_lvl"] * (1 + ss_d), pos["tp_lvl"] * (1 + ts_d)
+        if pos["entry_date"] != d and o <= stop_t:
             close_pos(s, o, d, "Stop"); return True
-        if l <= pos["stop"]:
+        if l <= stop_t:
             close_pos(s, pos["stop_lvl"], d, "Stop", bid_fill); return True
-        if pos["entry_date"] != d and o >= pos["tp"]:
+        if pos["entry_date"] != d and o >= tp_t:
             close_pos(s, o, d, "Στόχος"); return True
-        if h >= pos["tp"]:
+        if h >= tp_t:
             close_pos(s, pos["tp_lvl"], d, "Στόχος", bid_fill); return True
         return False
 
@@ -283,6 +295,7 @@ def main() -> None:
     rk = CONFIG["risk"]
     real_costs = Costs(**CONFIG["costs"])
     lev_costs = Costs(**CONFIG["costs_leveraged_cfd"])
+    fl = fills()
 
     def rcfg(filt: bool) -> Risk:
         return Risk(rk["risk_per_trade"], rk["max_positions"], rk["max_total_risk"], rk["max_notional"], filt)
@@ -299,12 +312,16 @@ def main() -> None:
            "## 1. Χαρτοφυλάκιο (όλες οι μετοχές μαζί)", "",
            f"Ρίσκο {rk['risk_per_trade']:.2%} ανά συναλλαγή, έως {rk['max_positions']} θέσεις, "
            f"συνολικό ρίσκο έως {rk['max_total_risk']:.0%}, σύνολο θέσεων έως το κεφάλαιο. "
-           f"Κόστος (spread) {real_costs.per_side:.2%} ανά πράξη.", ""]
+           f"Κόστος (spread) {real_costs.per_side:.2%} ανά πράξη. " +
+           (f"Στόχος και stop όπως τα εκτελεί η Capital.com (στην τιμή πώλησης): ο στόχος πιάνεται όταν το υψηλό "
+            f"του Yahoo τον ξεπεράσει κατά {fl['tp_shift']:.2%} και το stop όταν το χαμηλό φτάσει "
+            f"{fl['stop_shift']:.2%} πάνω από αυτό (μέτρηση: `reports/research_fills.md`)."
+            if any(fl.values()) else "Στόχος και stop: με το άγγιγμα των τιμών του Yahoo."), ""]
     summary = {}
     for period, (start, end) in PERIODS.items():
         out += [f"### {period}", "", HEAD]
         for name, r, cst in runs:
-            st = stats(run(tradable, p, r, cst, start, end, market))
+            st = stats(run(tradable, p, r, cst, start, end, market, **fl))
             summary[f"{period} | {name}"] = st
             out.append(row(name, st))
         bh = buy_hold(market, start, end)
@@ -333,7 +350,7 @@ def main() -> None:
             "|---|---|---|---|---|---|---|"]
     every_stats = {}
     for period, (start, end) in PERIODS.items():
-        ts = trade_stats(run(tradable, p, every, real_costs, start, end, market)["trades"])
+        ts = trade_stats(run(tradable, p, every, real_costs, start, end, market, **fl)["trades"])
         every_stats[period] = ts
         if ts["trades"] == 0:
             out.append(f"| {period} | 0 | – | – | – | – | – |")
