@@ -31,14 +31,15 @@ def load_all(symbols: list[str], start: str = "2014-01-01") -> dict[str, pd.Data
     return {s: daily(s, start) for s in symbols}
 
 
-def intraday(symbol: str, interval: str = "1h", period: str = "730d", tries: int = 3) -> pd.DataFrame:
-    """Ενδοσυνεδριακά κεριά (κανονικό ωράριο), με ώρα Νέας Υόρκης χωρίς ζώνη."""
+def intraday(symbol: str, interval: str = "1h", period: str = "730d", tries: int = 3,
+             prepost: bool = False) -> pd.DataFrame:
+    """Ενδοσυνεδριακά κεριά, με ώρα Νέας Υόρκης χωρίς ζώνη. prepost: και πριν το άνοιγμα / μετά το κλείσιμο."""
     import yfinance as yf
 
     last_err = None
     for attempt in range(tries):
         try:
-            df = yf.Ticker(symbol).history(period=period, interval=interval, auto_adjust=True)
+            df = yf.Ticker(symbol).history(period=period, interval=interval, auto_adjust=True, prepost=prepost)
             if df.empty:
                 raise ValueError(f"κενά δεδομένα για {symbol}")
             df = df[COLS].dropna(subset=["Close"])
