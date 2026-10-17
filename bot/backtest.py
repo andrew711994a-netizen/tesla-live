@@ -53,7 +53,8 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
         start: str, end: str | None = None, market: pd.DataFrame | None = None,
         initial: float = 10_000.0, events: dict[str, list[pd.Timestamp]] | None = None,
         block: int = 0, exit_before: bool = False, tp_shift: float = 0.0, stop_shift: float = 0.0,
-        broker_adj: float = 0.0, day_fill=None) -> dict:
+        broker_adj: float = 0.0, day_fill=None, sig_mod=None, allow: pd.Series | None = None,
+        risk_scale: pd.Series | None = None) -> dict:
     """events: οι συνεδριάσεις με αποτελέσματα ανά μετοχή. block: καμία αγορά αν έρχονται αποτελέσματα στις
     επόμενες block συνεδριάσεις. exit_before: κλείσιμο στο άνοιγμα της συνεδρίασης πριν από τα αποτελέσματα.
     tp_shift/stop_shift: η Capital.com κλείνει στόχο και stop όταν η τιμή πώλησης (bid) φτάσει το επίπεδο, και
@@ -61,8 +62,12 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
     tp·(1+tp_shift) και το stop όταν το χαμηλό πέσει στο stop·(1+stop_shift), και η πώληση γίνεται ακριβώς στο
     επίπεδο (το spread είναι ήδη μέσα στο bid). 0 και τα δύο = άγγιγμα στο Yahoo και κόστος spread (παλιό backtest).
     broker_adj: μόνο για έρευνα· stop και στόχος καταχωρούνται στην Capital.com τόσο % πιο χαμηλά.
-    day_fill: μόνο για έρευνα· (μετοχή, μέρα) → (tp_shift, stop_shift) εκείνης της μέρας, αντί για σταθερά."""
+    day_fill: μόνο για έρευνα· (μετοχή, μέρα) → (tp_shift, stop_shift) εκείνης της μέρας, αντί για σταθερά.
+    sig_mod / allow / risk_scale: μόνο για έρευνα· αλλαγή των σημάτων ανά μετοχή, επιπλέον φίλτρο νέων αγορών
+    (μέρα του σήματος → True/False) και πολλαπλασιαστής του ρίσκου ανά συναλλαγή (μέρα αγοράς → αριθμός)."""
     sigs = {s: signals(df, p) for s, df in data.items()}
+    if sig_mod is not None:
+        sigs = {s: sig_mod(s, sg) for s, sg in sigs.items()}
     mkt = market_ok(market, p) if (risk.use_market_filter and market is not None) else None
     end_ts = pd.Timestamp(end) if end else None
     dates = sorted(set().union(*[df.index for df in data.values()]))
@@ -141,7 +146,8 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
             if block and (n := to_event(s, pos_of[d])) is not None and n <= block:
                 continue
             eq = equity
-            qty = eq * risk.risk_per_trade / dist
+            mult = 1.0 if risk_scale is None else float(risk_scale.get(d, 1.0))
+            qty = eq * risk.risk_per_trade * mult / dist
             notional_used = sum(ps["qty"] * last_close.get(x, ps["entry"]) for x, ps in positions.items())
             qty = min(qty, max(0.0, risk.max_notional * eq - notional_used) / o)
             risk_used = sum(ps["qty"] * ps["dist"] for ps in positions.values())
@@ -187,6 +193,8 @@ def run(data: dict[str, pd.DataFrame], p: Params, risk: Risk, costs: Costs,
 
         # 4) Νέα σήματα στο κλείσιμο
         allowed = True if mkt is None else bool(mkt.get(d, False))
+        if allow is not None:
+            allowed = allowed and bool(allow.get(d, True))
         if allowed:
             cands = []
             for s, sg in sigs.items():
