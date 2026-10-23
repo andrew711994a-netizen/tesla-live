@@ -11,3 +11,4 @@ date,env,equity_demo,open_positions,market_filter_ok,actions
 2026-10-20,demo,10216.78,MRK:+1.7%;MA:+2.5%;PFE:+0.0%;PG:-0.5%;JNJ:-1.0%;JPM:-0.8%,True,-
 2026-10-21,demo,10253.02,MRK:+3.1%;MA:+2.6%;PFE:+0.5%;PG:-0.8%;JNJ:-1.0%;JPM:-0.2%,True,-
 2026-10-22,demo,10398.34,MRK:+5.2%;MA:+3.8%;PFE:+0.8%;JNJ:+0.1%;JPM:-1.0%,True,ΑΓΟΡΑ AMD (AMD) · 3.47 μονάδες στα ~524.76 · stop 499.62 (-4.8%) · στόχος 632.37 (+20.5%) · pullback
+2026-10-23,demo,10429.56,MA:+4.6%;AMD:-2.8%;PFE:+1.7%;JNJ:+2.2%;JPM:-1.5%,True,ΑΓΟΡΑ PG (PG) · 14.05 μονάδες στα ~164.17 · stop 159.48 (-2.9%) · στόχος 174.75 (+6.4%) · breakout
