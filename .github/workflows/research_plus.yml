@@ -1,14 +1,14 @@
 name: Research plus
 
 # Έρευνες κερδοφορίας (bot/research_*.py). Τρέχουν μόνο χειροκίνητα· δεν αλλάζουν τίποτα στο bot.
-# Τα research_fills και research_session_stop διαβάζουν και τιμές από την Capital.com (μόνο ανάγνωση, καμία εντολή).
+# Τα research_fills, research_session_stop και research_minsize διαβάζουν και τιμές από την Capital.com (μόνο ανάγνωση, καμία εντολή).
 on:
   workflow_dispatch:
     inputs:
       study:
         description: "Ποια έρευνα"
         type: choice
-        options: [research_plus, research_exits, research_entries, research_ema, research_signals, research_earnings, research_params, research_fills, research_session_stop, research_ideas]
+        options: [research_plus, research_exits, research_entries, research_ema, research_signals, research_earnings, research_params, research_fills, research_session_stop, research_ideas, research_minsize]
         default: research_plus
 
 permissions:
@@ -33,12 +33,12 @@ jobs:
           cache-dependency-path: bot/requirements.txt
       - run: pip install -r bot/requirements.txt
       - name: Run research
-        env:   # κλειδιά της Capital.com (μόνο ανάγνωση τιμών) μόνο για research_fills και research_session_stop
-          CAPITAL_API_KEY: ${{ (inputs.study == 'research_fills' || inputs.study == 'research_session_stop') && secrets.CAPITAL_API_KEY || '' }}
-          CAPITAL_IDENTIFIER: ${{ (inputs.study == 'research_fills' || inputs.study == 'research_session_stop') && secrets.CAPITAL_IDENTIFIER || '' }}
-          CAPITAL_PASSWORD: ${{ (inputs.study == 'research_fills' || inputs.study == 'research_session_stop') && secrets.CAPITAL_PASSWORD || '' }}
+        env:   # κλειδιά της Capital.com (μόνο ανάγνωση τιμών) μόνο για research_fills, research_session_stop και research_minsize
+          CAPITAL_API_KEY: ${{ (inputs.study == 'research_fills' || inputs.study == 'research_session_stop' || inputs.study == 'research_minsize') && secrets.CAPITAL_API_KEY || '' }}
+          CAPITAL_IDENTIFIER: ${{ (inputs.study == 'research_fills' || inputs.study == 'research_session_stop' || inputs.study == 'research_minsize') && secrets.CAPITAL_IDENTIFIER || '' }}
+          CAPITAL_PASSWORD: ${{ (inputs.study == 'research_fills' || inputs.study == 'research_session_stop' || inputs.study == 'research_minsize') && secrets.CAPITAL_PASSWORD || '' }}
         run: |
-          case "$STUDY" in research_plus|research_exits|research_entries|research_ema|research_signals|research_earnings|research_params|research_fills|research_session_stop|research_ideas) ;; *) echo "Άγνωστη έρευνα: $STUDY"; exit 1;; esac
+          case "$STUDY" in research_plus|research_exits|research_entries|research_ema|research_signals|research_earnings|research_params|research_fills|research_session_stop|research_ideas|research_minsize) ;; *) echo "Άγνωστη έρευνα: $STUDY"; exit 1;; esac
           python -m "bot.$STUDY"
           cat "reports/$STUDY.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Save report
