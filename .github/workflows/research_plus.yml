@@ -8,7 +8,7 @@ on:
       study:
         description: "Ποια έρευνα"
         type: choice
-        options: [research_plus, research_exits, research_entries, research_ema, research_signals, research_earnings, research_params, research_fills, research_session_stop, research_ideas, research_minsize, research_short]
+        options: [research_plus, research_exits, research_entries, research_ema, research_signals, research_earnings, research_params, research_fills, research_session_stop, research_ideas, research_minsize, research_short, macro]
         default: research_plus
 
 permissions:
@@ -38,7 +38,7 @@ jobs:
           CAPITAL_IDENTIFIER: ${{ (inputs.study == 'research_fills' || inputs.study == 'research_session_stop' || inputs.study == 'research_minsize') && secrets.CAPITAL_IDENTIFIER || '' }}
           CAPITAL_PASSWORD: ${{ (inputs.study == 'research_fills' || inputs.study == 'research_session_stop' || inputs.study == 'research_minsize') && secrets.CAPITAL_PASSWORD || '' }}
         run: |
-          case "$STUDY" in research_plus|research_exits|research_entries|research_ema|research_signals|research_earnings|research_params|research_fills|research_session_stop|research_ideas|research_minsize|research_short) ;; *) echo "Άγνωστη έρευνα: $STUDY"; exit 1;; esac
+          case "$STUDY" in research_plus|research_exits|research_entries|research_ema|research_signals|research_earnings|research_params|research_fills|research_session_stop|research_ideas|research_minsize|research_short|macro) ;; *) echo "Άγνωστη έρευνα: $STUDY"; exit 1;; esac
           python -m "bot.$STUDY"
           cat "reports/$STUDY.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Save report
