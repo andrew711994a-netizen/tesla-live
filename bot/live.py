@@ -480,7 +480,13 @@ def run() -> int:
                 f"{ps['epic']} {ps['direction']} {ps['size']} @ {ps['level']} · κ/ζ {ps['upl']:+.2f}" for ps in others))
         else:
             say(f"Άλλες θέσεις στον λογαριασμό (όχι του bot): {len(others)}")
-    if equity <= 0 and env == "live" and dry:
+    if equity <= 0 and env == "live" and dry:   # πριν την κατάθεση: ελέγχουμε τουλάχιστον τη μόχλευση
+        for asset, want in CONFIG.get("leverage", {}).items():
+            try:
+                cur = cap.leverage(asset)
+                say(f"Μόχλευση {asset}: 1:{cur}" + (" ✓" if cur == want else f" ⚠️ πρέπει να γίνει 1:{want}"))
+            except CapitalError as e:
+                say(f"⚠️ Δεν μπόρεσα να διαβάσω τη μόχλευση {asset}: {e}")
         say("Ο πραγματικός λογαριασμός δεν έχει ακόμα χρήματα. Τίποτα να κάνω.")
         return 0
     if equity <= 0:
