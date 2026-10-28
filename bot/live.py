@@ -488,6 +488,8 @@ def run() -> int:
             except CapitalError as e:
                 say(f"⚠️ Δεν μπόρεσα να διαβάσω τη μόχλευση {asset}: {e}")
         say("Ο πραγματικός λογαριασμός δεν έχει ακόμα χρήματα. Τίποτα να κάνω.")
+        if not force:   # μία φορά τη μέρα, όπως κάθε δοκιμή
+            (JOURNAL / DRY_MARK).write_text(json.dumps({"last_run": str(now.date())}), encoding="utf-8")
         return 0
     if equity <= 0:
         say("🛑 Η αξία του λογαριασμού φαίνεται μηδενική ή αρνητική. Δεν κάνω τίποτα, έλεγξε τον λογαριασμό.")
