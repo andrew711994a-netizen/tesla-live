@@ -91,6 +91,10 @@
   "leverage": {
     "SHARES": 1
   },
+  "live": {
+    "_note": "Πραγματικός λογαριασμός (job live στο trade.yml, ημερολόγιο journal/live/). Με orders false κάνει μόνο δοκιμή, χωρίς εντολές· γίνεται true μόνο μετά από ρητό «ναι, live».",
+    "orders": false
+  },
   "costs_leveraged_cfd": {
     "per_side": 0.0007,
     "financing_annual": 0.08

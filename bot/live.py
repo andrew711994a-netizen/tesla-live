@@ -8,6 +8,7 @@
   CAPITAL_ENV      demo (προεπιλογή) ή live
   ALLOW_LIVE       πρέπει να είναι I_UNDERSTAND_THE_RISK για live λογαριασμό
   DRY_RUN          true (προεπιλογή): μόνο γράφει τι θα έκανε, χωρίς εντολές
+                   (στον live χρειάζεται επιπλέον "live": {"orders": true} στο config.json, αλλιώς πάντα δοκιμή)
   BOT_ENABLED      false: δεν κάνει τίποτα (κουμπί διακοπής)
   NTFY_TOPIC       θέμα στο ntfy.sh για ειδοποιήσεις στο κινητό
   FORCE            true: αγνοεί τον έλεγχο ώρας (για χειροκίνητη δοκιμή)
@@ -15,9 +16,13 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import math
 import os
+import struct
 import sys
 import time
 from datetime import datetime
@@ -68,12 +73,12 @@ def load_state() -> dict:
 
 
 def save_state(data: dict) -> None:
-    JOURNAL.mkdir(exist_ok=True)
+    JOURNAL.mkdir(parents=True, exist_ok=True)
     (JOURNAL / "positions.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def append_csv(name: str, header: str, row: list) -> None:
-    JOURNAL.mkdir(exist_ok=True)
+    JOURNAL.mkdir(parents=True, exist_ok=True)
     f = JOURNAL / name
     new = not f.exists()
     with f.open("a", encoding="utf-8") as fh:
@@ -88,6 +93,31 @@ def log_trade(entry: dict, exit_date, exit_px: float, reason: str, env: str) -> 
     append_csv("trades.csv", "open_date,close_date,symbol,entry,exit,result_pct,r_multiple,reason,env",
                [entry["date"], exit_date, entry["symbol"], f"{entry['entry']:.2f}", f"{exit_px:.2f}",
                 f"{res * 100:+.2f}", f"{r:+.2f}", reason, env])
+
+
+# Το αποθετήριο είναι δημόσιο: ποσά του πραγματικού λογαριασμού (το υψηλότερο σημείο για το φρένο και η αξία στην
+# έναρξη) αποθηκεύονται κρυπτογραφημένα με το κλειδί API, που υπάρχει μόνο στα GitHub Secrets.
+def _mac(key: bytes, msg: bytes) -> bytes:
+    return hmac.new(key, msg, hashlib.sha256).digest()
+
+
+def seal(x: float) -> str:
+    key, nonce = os.environ.get("CAPITAL_API_KEY", "").encode(), os.urandom(8)
+    body = bytes(a ^ b for a, b in zip(struct.pack(">d", x), _mac(key, b"amount" + nonce)))
+    return base64.urlsafe_b64encode(nonce + body + _mac(key, nonce + body)[:6]).decode()
+
+
+def unseal(token: str | None) -> float | None:
+    """None αν λείπει ή αν κρυπτογραφήθηκε με άλλο κλειδί (π.χ. μετά από νέο κλειδί API)."""
+    key = os.environ.get("CAPITAL_API_KEY", "").encode()
+    try:
+        raw = base64.urlsafe_b64decode((token or "").encode())
+    except ValueError:
+        return None
+    nonce, body, tag = raw[:8], raw[8:16], raw[16:]
+    if len(raw) != 22 or not hmac.compare_digest(tag, _mac(key, nonce + body)[:6]):
+        return None
+    return struct.unpack(">d", bytes(a ^ b for a, b in zip(body, _mac(key, b"amount" + nonce))))[0]
 
 
 VIRTUAL = "virtual.json"
@@ -131,7 +161,7 @@ def update_virtual(frames: dict, p: Params, rk: dict, state: dict, sigs: dict, m
 
     done = sorted((t for t in trades if t["reason"] != "Τέλος"), key=lambda t: (t["exit_date"], t["symbol"]))
     still = sorted((t for t in trades if t["reason"] == "Τέλος"), key=lambda t: (t["entry_date"], t["symbol"]))
-    JOURNAL.mkdir(exist_ok=True)
+    JOURNAL.mkdir(parents=True, exist_ok=True)
     lines = ["open_date,close_date,symbol,entry,exit,result_pct,r_multiple,reason,real"]
     lines += [f"{t['entry_date']:%Y-%m-%d},{t['exit_date']:%Y-%m-%d},{t['symbol']},{t['entry']:.2f},{t['exit']:.2f},"
               f"{net(t):+.2f},{t['r']:+.2f},{t['reason']},{'ναι' if is_real(t) else 'όχι'}" for t in done]
@@ -226,7 +256,13 @@ def env_flag(name: str, default: bool) -> bool:
 
 
 def dry_flag() -> bool:
-    """Λειτουργία δοκιμής: σβήνει ΜΟΝΟ με ρητό false/0/no/off· οποιοδήποτε άλλο (ή λάθος) γράψιμο = δοκιμή."""
+    """Λειτουργία δοκιμής: σβήνει ΜΟΝΟ με ρητό false/0/no/off· οποιοδήποτε άλλο (ή λάθος) γράψιμο = δοκιμή.
+
+    Στον πραγματικό λογαριασμό χρειάζεται επιπλέον "live": {"orders": true} στο config.json.
+    """
+    live = os.environ.get("CAPITAL_ENV", "").strip().lower() == "live"
+    if live and CONFIG.get("live", {}).get("orders") is not True:
+        return True
     return os.environ.get("DRY_RUN", "").strip().lower() not in ("0", "false", "no", "off")
 
 
@@ -260,7 +296,7 @@ def write_run_log(status: str) -> None:
 
     Οι δοκιμές γράφουν σε χωριστό αρχείο, για να μη σβήνουν το σημείωμα της πραγματικής εκτέλεσης.
     """
-    JOURNAL.mkdir(exist_ok=True)
+    JOURNAL.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(NY).strftime("%Y-%m-%d %H:%M")
     dry = dry_flag()
     name, kind = ("last_dry_run.md", "δοκιμή") if dry else ("last_run.md", "εκτέλεση")
@@ -296,14 +332,19 @@ def run() -> int:
         return 0
 
     env = os.environ.get("CAPITAL_ENV", "demo").strip().lower() or "demo"
+    if env == "live":   # χωριστό ημερολόγιο για τον πραγματικό λογαριασμό
+        global JOURNAL
+        if JOURNAL.name != "live":
+            JOURNAL = JOURNAL / "live"
     if env == "live" and os.environ.get("ALLOW_LIVE") != "I_UNDERSTAND_THE_RISK":
         say("Άρνηση: ο live λογαριασμός χρειάζεται ALLOW_LIVE=I_UNDERSTAND_THE_RISK.")
         return 1
+    names = ["CAPITAL_API_KEY", "CAPITAL_IDENTIFIER", "CAPITAL_PASSWORD"]
+    if env == "live" and not any(os.environ.get(n, "").strip() for n in names):
+        print("Δεν έχουν οριστεί ακόμα τα στοιχεία του πραγματικού λογαριασμού (CAPITAL_LIVE_*). Τίποτα να κάνω.")
+        return SKIP
     dry = dry_flag()
     force = env_flag("FORCE", False)
-    if env == "live":   # χωριστό ημερολόγιο για τον πραγματικό λογαριασμό
-        global JOURNAL
-        JOURNAL = JOURNAL / "live"
     now = datetime.now(NY)
     trade_at = now.replace(hour=TRADE_AT[0], minute=TRADE_AT[1], second=0, microsecond=0)
     if not force:
@@ -387,8 +428,8 @@ def run() -> int:
         time.sleep(wait)
 
     # 2) Σύνδεση με την Capital.com
-    names = ["CAPITAL_API_KEY", "CAPITAL_IDENTIFIER", "CAPITAL_PASSWORD"]
-    missing = [n for n in names if not os.environ.get(n, "").strip()]
+    missing = [n.replace("CAPITAL_", "CAPITAL_LIVE_") if env == "live" else n
+               for n in names if not os.environ.get(n, "").strip()]
     if len(missing) == len(names):
         say("Δεν έχουν οριστεί τα στοιχεία σύνδεσης (GitHub Secrets). Δες το bot/README.md. Τίποτα να κάνω.")
         return 0
@@ -423,6 +464,8 @@ def run() -> int:
         say(f"Demo: υπόλοιπο {acc['balance']:.2f} · χωρίς ανοιχτά {acc['deposit']:.2f} · "
             f"ανοιχτά κ/ζ {acc['pnl']:+.2f} · διαθέσιμα {acc['available']:.2f} · "
             f"λογαριασμοί {acc['n_accounts']} · τρέχων: {'ναι' if acc['is_current'] else 'όχι'}")
+    else:               # πραγματικά χρήματα σε δημόσιο αποθετήριο: κανένα ποσό
+        say(f"Λογαριασμοί στη σύνδεση: {acc['n_accounts']} · τρέχων: {'ναι' if acc['is_current'] else 'όχι'}")
     for ps in positions:   # κάθε θέση του bot πρέπει να έχει stop-loss και στόχο καταχωρημένα στην Capital.com
         px = float(ps["bid"] or ps["level"])
         chg = (px / ps["level"] - 1) * 100 if ps["level"] else 0.0
@@ -437,6 +480,9 @@ def run() -> int:
                 f"{ps['epic']} {ps['direction']} {ps['size']} @ {ps['level']} · κ/ζ {ps['upl']:+.2f}" for ps in others))
         else:
             say(f"Άλλες θέσεις στον λογαριασμό (όχι του bot): {len(others)}")
+    if equity <= 0 and env == "live" and dry:
+        say("Ο πραγματικός λογαριασμός δεν έχει ακόμα χρήματα. Τίποτα να κάνω.")
+        return 0
     if equity <= 0:
         say("🛑 Η αξία του λογαριασμού φαίνεται μηδενική ή αρνητική. Δεν κάνω τίποτα, έλεγξε τον λογαριασμό.")
         notify("Bot: πρόβλημα στον λογαριασμό", "\n".join(log[-3:]))
@@ -546,7 +592,8 @@ def run() -> int:
             reason = "Αποτελέσματα αύριο"
         if not reason:
             continue
-        msg = f"ΚΛΕΙΣΙΜΟ {sym} ({ps['size']}) · λόγος: {reason}, {held} μέρες σε θέση"
+        size_txt = f" ({ps['size']})" if env == "demo" else ""   # στον live κανένα μέγεθος (δημόσιο αποθετήριο)
+        msg = f"ΚΛΕΙΣΙΜΟ {sym}{size_txt} · λόγος: {reason}, {held} μέρες σε θέση"
         if not dry:
             try:
                 conf = cap.close(ps["deal_id"])
@@ -590,8 +637,23 @@ def run() -> int:
             say(msg)
             actions.append(msg)
     # Φρένο: πτώση από το υψηλότερο σημείο του λογαριασμού αφότου ξεκίνησε το bot
-    peak = max(float(meta.get("peak_equity") or equity), equity)
-    meta["peak_equity"] = peak
+    if env == "live":
+        old_peak, start_eq = unseal(meta.get("peak_sealed")), unseal(meta.get("start_sealed"))
+        if meta.get("peak_sealed") and old_peak is None:
+            say("⚠️ Νέο κλειδί API: το υψηλότερο σημείο και η έναρξη του λογαριασμού μετρούν ξανά από σήμερα.")
+            start_eq = None
+        start_eq = start_eq or equity
+    else:
+        old_peak = meta.get("peak_equity")
+    peak = max(float(old_peak or equity), equity)
+    if env == "live":
+        meta.pop("peak_equity", None)
+        meta["peak_sealed"], meta["start_sealed"] = seal(peak), seal(start_eq)
+        if record:   # μόνο ποσοστά (οι καταθέσεις και οι αναλήψεις μετράνε κι αυτές)
+            say(f"Πραγματικός λογαριασμός: {(equity / start_eq - 1) * 100:+.1f}% από την έναρξη του bot · "
+                f"{(equity / peak - 1) * 100:+.1f}% από το υψηλότερο σημείο")
+    else:
+        meta["peak_equity"] = peak
     if equity < peak * (1 - rk["max_drawdown_stop"]):
         allow_new = False
         msg = (f"🛑 Ο λογαριασμός έπεσε {(1 - equity / peak) * 100:.0f}% από το υψηλότερο σημείο του "
@@ -683,7 +745,8 @@ def run() -> int:
                        else f"πολύ μικρή θέση (κάτω από {MIN_POSITION:.0%} του λογαριασμού)")
                 say(f"Παράλειψη {sym}: {why}.")
                 continue
-            msg = (f"ΑΓΟΡΑ {sym} ({epic}) · {size} μονάδες στα ~{price:.2f} · stop {stop:.2f} "
+            amount = f"{size} μονάδες" if env == "demo" else f"{size * price * rate / equity:.0%} του λογαριασμού"
+            msg = (f"ΑΓΟΡΑ {sym} ({epic}) · {amount} στα ~{price:.2f} · stop {stop:.2f} "
                    f"({(stop / price - 1) * 100:+.1f}%) · στόχος {tp:.2f} ({(tp / price - 1) * 100:+.1f}%) · {sg['kind']}")
             ok = True
             if not dry:
@@ -718,7 +781,7 @@ def run() -> int:
     if not actions:
         say("Καμία κίνηση σήμερα.")
     if dry and not force:   # και οι προγραμματισμένες δοκιμές τρέχουν μία φορά τη μέρα
-        JOURNAL.mkdir(exist_ok=True)
+        JOURNAL.mkdir(parents=True, exist_ok=True)
         (JOURNAL / DRY_MARK).write_text(json.dumps({"last_run": str(today.date())}), encoding="utf-8")
     if record:
         meta["last_run"] = str(today.date())
