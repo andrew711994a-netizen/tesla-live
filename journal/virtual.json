@@ -1,126 +1,141 @@
 {
- "updated": "2026-10-28",
+ "updated": "2026-10-29",
  "since": "2026-10-07",
  "missing": [],
  "closed": {
   "trades": 6,
   "win": 0.6666666666666666,
-  "avg_r": 0.48272531074154584,
-  "avg_pct": 0.02792047453227595,
-  "total_r": 2.896351864449275
+  "avg_r": 0.4827253120284802,
+  "avg_pct": 0.027920474553754893,
+  "total_r": 2.896351872170881
  },
  "open": [
   {
    "symbol": "MA",
    "date": "2026-10-14",
    "entry": 605.5,
-   "last_close": 609.85,
-   "result_pct": 0.58,
-   "r": 0.17,
+   "last_close": 610.31,
+   "result_pct": 0.65,
+   "r": 0.19,
    "real": true
   },
   {
    "symbol": "JPM",
    "date": "2026-10-15",
    "entry": 337.25,
-   "last_close": 335.79,
-   "result_pct": -0.57,
-   "r": -0.13,
+   "last_close": 339.3,
+   "result_pct": 0.47,
+   "r": 0.11,
    "real": true
   },
   {
    "symbol": "PFE",
    "date": "2026-10-15",
    "entry": 29.57,
-   "last_close": 29.8,
-   "result_pct": 0.64,
-   "r": 0.13,
+   "last_close": 29.45,
+   "result_pct": -0.55,
+   "r": -0.11,
    "real": true
   },
   {
    "symbol": "KO",
    "date": "2026-10-16",
    "entry": 92.99,
-   "last_close": 91.18,
-   "result_pct": -2.09,
-   "r": -0.51,
+   "last_close": 91.73,
+   "result_pct": -1.49,
+   "r": -0.37,
    "real": false
   },
   {
    "symbol": "LLY",
    "date": "2026-10-16",
    "entry": 1256.0,
-   "last_close": 1281.91,
-   "result_pct": 1.92,
-   "r": 0.31,
+   "last_close": 1288.3,
+   "result_pct": 2.43,
+   "r": 0.39,
    "real": false
   },
   {
    "symbol": "UNH",
    "date": "2026-10-16",
    "entry": 410.35,
-   "last_close": 410.39,
-   "result_pct": -0.13,
-   "r": -0.02,
+   "last_close": 407.1,
+   "result_pct": -0.93,
+   "r": -0.14,
    "real": false
   },
   {
    "symbol": "V",
    "date": "2026-10-16",
    "entry": 402.5,
-   "last_close": 401.86,
-   "result_pct": -0.3,
-   "r": -0.07,
+   "last_close": 400.6,
+   "result_pct": -0.61,
+   "r": -0.15,
    "real": false
   },
   {
    "symbol": "AMD",
    "date": "2026-10-20",
    "entry": 530.02,
-   "last_close": 560.26,
-   "result_pct": 5.56,
-   "r": 0.64,
+   "last_close": 578.44,
+   "result_pct": 8.99,
+   "r": 1.03,
    "real": false
   },
   {
    "symbol": "NVDA",
    "date": "2026-10-20",
    "entry": 215.98,
-   "last_close": 217.94,
-   "result_pct": 0.77,
-   "r": 0.15,
+   "last_close": 215.38,
+   "result_pct": -0.42,
+   "r": -0.08,
    "real": false
   },
   {
    "symbol": "MU",
    "date": "2026-10-22",
    "entry": 879.66,
-   "last_close": 928.76,
-   "result_pct": 5.44,
-   "r": 0.78,
+   "last_close": 983.23,
+   "result_pct": 11.63,
+   "r": 1.67,
    "real": false
   },
   {
    "symbol": "AAPL",
    "date": "2026-10-23",
    "entry": 349.12,
-   "last_close": 347.1,
-   "result_pct": -0.72,
-   "r": -0.18,
+   "last_close": 343.83,
+   "result_pct": -1.65,
+   "r": -0.42,
    "real": false
   },
   {
    "symbol": "CSCO",
    "date": "2026-10-26",
    "entry": 108.15,
-   "last_close": 111.38,
-   "result_pct": 2.84,
-   "r": 0.41,
+   "last_close": 110.29,
+   "result_pct": 1.84,
+   "r": 0.27,
+   "real": true
+  },
+  {
+   "symbol": "INTC",
+   "date": "2026-10-28",
+   "entry": 95.09,
+   "last_close": 95.53,
+   "result_pct": 0.32,
+   "r": 0.02,
+   "real": false
+  },
+  {
+   "symbol": "TXN",
+   "date": "2026-10-28",
+   "entry": 308.79,
+   "last_close": 309.83,
+   "result_pct": 0.2,
+   "r": 0.03,
    "real": true
   }
  ],
- "signals_today": [
-  "INTC",
-  "TXN"
- ]
+ "signals_today": []
 }
