@@ -22,8 +22,9 @@ from .strategy import _ema
 
 ROOT = Path(__file__).resolve().parent.parent
 NAMES = {"SI=F": "Ασήμι (συμβόλαιο Comex)", "GC=F": "Χρυσός (συμβόλαιο Comex)"}
-COMBOS = [(1.5, 3.0), (2.0, 3.0), (2.0, 4.0), (2.5, 4.0), (3.0, 4.5), (3.0, 6.0)]
-HOLD = 40   # έως 40 συνεδριάσεις (~2 μήνες)
+# (συνεδριάσεις, τίτλος, συνδυασμοί stop/στόχου σε ATR· στόχος None = μόνο stop, έξοδος στο τέλος)
+PLANS = [(40, "έως 2 μήνες", [(1.5, 3.0), (2.0, 3.0), (2.0, 4.0), (2.5, 4.0), (3.0, 4.5), (3.0, 6.0)]),
+         (80, "έως 4 μήνες", [(3.0, 6.0), (4.0, 6.0), (4.0, 8.0), (5.0, 8.0), (5.0, 10.0), (5.0, None)])]
 
 
 def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
@@ -32,19 +33,20 @@ def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
     return tr.ewm(alpha=1 / n, adjust=False).mean()
 
 
-def outcomes(df: pd.DataFrame, a: pd.Series, k_stop: float, k_tp: float, entries: pd.Index) -> dict:
-    """Αγορά στο κλείσιμο κάθε μέρας εισόδου· τι ήρθε πρώτο μέσα σε HOLD συνεδριάσεις."""
+def outcomes(df: pd.DataFrame, a: pd.Series, k_stop: float, k_tp: float | None, entries: pd.Index,
+             hold: int = 40) -> dict:
+    """Αγορά στο κλείσιμο κάθε μέρας εισόδου· τι ήρθε πρώτο μέσα σε `hold` συνεδριάσεις."""
     hi, lo, cl = df["High"].to_numpy(), df["Low"].to_numpy(), df["Close"].to_numpy()
     pos = {d: i for i, d in enumerate(df.index)}
-    tp_n = st_n = r_sum = n = 0
+    tp_n = st_n = r_sum = ret_sum = n = 0
     for d in entries:
         i = pos[d]
-        if i + HOLD >= len(df):
+        if i + hold >= len(df):
             continue
         px, dist = cl[i], k_stop * a.iloc[i]
-        stop, tp = px - dist, px + k_tp * a.iloc[i]
+        stop, tp = px - dist, (px + k_tp * a.iloc[i] if k_tp else np.inf)
         r = None
-        for j in range(i + 1, i + HOLD + 1):
+        for j in range(i + 1, i + hold + 1):
             if lo[j] <= stop:
                 r = -1.0
                 st_n += 1
@@ -54,10 +56,12 @@ def outcomes(df: pd.DataFrame, a: pd.Series, k_stop: float, k_tp: float, entries
                 tp_n += 1
                 break
         if r is None:
-            r = (cl[i + HOLD] - px) / dist
+            r = (cl[i + hold] - px) / dist
         r_sum += r
+        ret_sum += r * dist / px
         n += 1
-    return {"n": n, "tp": tp_n / n if n else 0, "stop": st_n / n if n else 0, "avg_r": r_sum / n if n else 0}
+    return {"n": n, "tp": tp_n / n if n else 0, "stop": st_n / n if n else 0, "avg_r": r_sum / n if n else 0,
+            "avg_ret": ret_sum / n if n else 0}
 
 
 def main() -> None:
@@ -80,19 +84,20 @@ def main() -> None:
                 f"- Μέση ημερήσια κίνηση (ATR 14): **{a_now:.2f} $ ({a_now / last:.1%})**",
                 f"- Χαμηλό 20 ημερών {df['Low'].iloc[-20:].min():.2f} · χαμηλό 60 ημερών {df['Low'].iloc[-60:].min():.2f}"
                 f" · υψηλό 60 ημερών {df['High'].iloc[-60:].max():.2f} · υψηλό έτους {df['High'].iloc[-252:].max():.2f}",
-                f"- Μέσος 50 ημερών {e50:.2f} ({last / e50 - 1:+.1%}) · μέσος 150 ημερών {e150:.2f} ({last / e150 - 1:+.1%})",
-                "", "**Ιστορικά (2014–σήμερα), αγορά στο κλείσιμο, έως 2 μήνες:**", "",
-                "| Stop | Στόχος | Stop σε $ από σήμερα | Στόχος σε $ από σήμερα | Όλες οι μέρες: στόχος πρώτα / stop πρώτα / μέσο R "
-                "| Μετά από πτώση ≥10% από το υψηλό 60 ημερών: στόχος / stop / μέσο R |",
-                "|---|---|---|---|---|---|"]
+                f"- Μέσος 50 ημερών {e50:.2f} ({last / e50 - 1:+.1%}) · μέσος 150 ημερών {e150:.2f} ({last / e150 - 1:+.1%})"]
         hist = df.index[150:]
         dip = hist[(df["Close"] / df["High"].rolling(60).max()).loc[hist] <= 0.90]
-        for ks, kt in COMBOS:
-            al, dp = outcomes(df, a, ks, kt, hist), outcomes(df, a, ks, kt, dip)
-            out.append(f"| {ks:g}×ATR ({-ks * a_now / last:.1%}) | {kt:g}×ATR ({kt * a_now / last:+.1%}) | "
-                       f"{last - ks * a_now:.2f} | {last + kt * a_now:.2f} | "
-                       f"{al['tp']:.0%} / {al['stop']:.0%} / {al['avg_r']:+.2f} | "
-                       f"{dp['tp']:.0%} / {dp['stop']:.0%} / {dp['avg_r']:+.2f} ({dp['n']} μέρες) |")
+        for hold, title, combos in PLANS:
+            out += ["", f"**Ιστορικά (2014–σήμερα), αγορά στο κλείσιμο, {title}:**", "",
+                    "| Stop | Στόχος | Stop σε $ από σήμερα | Στόχος σε $ από σήμερα | Όλες οι μέρες: στόχος πρώτα / stop "
+                    "πρώτα / μέσο R / μέσο % | Μετά από πτώση ≥10% από το υψηλό 60 ημερών: στόχος / stop / μέσο R / μέσο % |",
+                    "|---|---|---|---|---|---|"]
+            for ks, kt in combos:
+                al, dp = outcomes(df, a, ks, kt, hist, hold), outcomes(df, a, ks, kt, dip, hold)
+                tp_txt = (f"{kt:g}×ATR ({kt * a_now / last:+.1%})", f"{last + kt * a_now:.2f}") if kt else ("χωρίς", "—")
+                out.append(f"| {ks:g}×ATR ({-ks * a_now / last:.1%}) | {tp_txt[0]} | {last - ks * a_now:.2f} | {tp_txt[1]} | "
+                           f"{al['tp']:.0%} / {al['stop']:.0%} / {al['avg_r']:+.2f} / {al['avg_ret']:+.1%} | "
+                           f"{dp['tp']:.0%} / {dp['stop']:.0%} / {dp['avg_r']:+.2f} / {dp['avg_ret']:+.1%} ({dp['n']} μέρες) |")
         out.append("")
     comma = re.compile(r"(\d)\.(\d)")   # ελληνική υποδιαστολή
     text = "\n".join(comma.sub(r"\1,\2", line) if line.startswith(("-", "|")) else line for line in out)
