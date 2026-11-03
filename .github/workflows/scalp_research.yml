@@ -31,7 +31,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: scalp-research
+  group: scalp-research-${{ inputs.out || inputs.module }}   # διαφορετικές αναφορές τρέχουν παράλληλα
   cancel-in-progress: true
 
 jobs:
