@@ -15,12 +15,14 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import requests
 
 from .capital import Capital, CapitalError
 
@@ -67,10 +69,16 @@ def download(cap: Capital, epic: str, days: int = DAYS) -> pd.DataFrame:
         b = min(a + timedelta(minutes=460), datetime.now(timezone.utc).replace(second=0, microsecond=0))
         if b <= a:
             continue
-        try:
-            rows += cap.prices(epic, "MINUTE", a.strftime(fmt), b.strftime(fmt))
-        except CapitalError:
-            pass  # αργία ή πιο παλιά από όσο κρατά η Capital.com
+        for attempt in range(4):   # η Capital.com αργεί καμιά φορά να απαντήσει: ξαναρωτάμε, όχι εγκατάλειψη
+            try:
+                rows += cap.prices(epic, "MINUTE", a.strftime(fmt), b.strftime(fmt))
+                break
+            except CapitalError:
+                break  # αργία ή πιο παλιά από όσο κρατά η Capital.com
+            except requests.RequestException:
+                if attempt == 3:
+                    raise
+                time.sleep(5 * (attempt + 1))
     return parse(rows)
 
 
