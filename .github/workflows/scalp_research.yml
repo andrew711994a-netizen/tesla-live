@@ -1,10 +1,15 @@
 name: Scalp research
 
-# Έρευνα scalping με πραγματικά κεριά 1 λεπτού της Capital.com (bot/scalp.py).
+# Έρευνα scalping με πραγματικά κεριά 1 λεπτού της Capital.com (bot/scalp.py· bot/scalp5.py για σήματα σε κεριά 5′).
 # Μόνο ανάγνωση τιμών: δεν ανοίγει θέσεις. Τρέχει μόνο χειροκίνητα.
 on:
   workflow_dispatch:
     inputs:
+      module:
+        description: "Έρευνα: scalp (κεριά 1′) ή scalp5 (σήματα σε κεριά 5′, μοτίβα)"
+        type: choice
+        options: [scalp, scalp5]
+        default: scalp
       days:
         description: "Ημέρες ιστορικού (κενό = 120)"
         type: string
@@ -14,11 +19,11 @@ on:
         type: string
         default: ""
       strategies:
-        description: "Τεχνικές (κενό = όλες): orb5,orb15,ema921,ema513,vwap2,vwap25"
+        description: "Τεχνικές (κενό = όλες) · scalp: orb5,orb15,ema921,ema513,vwap2,vwap25 · scalp5: engulf,hammer,pullback,star,inside,double,momentum,trendday,breakout"
         type: string
         default: ""
       out:
-        description: "Όνομα αναφοράς στο reports/ (κενό = scalp)"
+        description: "Όνομα αναφοράς στο reports/ (κενό = όνομα της έρευνας)"
         type: string
         default: ""
 
@@ -32,7 +37,7 @@ concurrency:
 jobs:
   research:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -51,9 +56,11 @@ jobs:
           SCALP_INSTRUMENTS: ${{ inputs.instruments }}
           SCALP_STRATS: ${{ inputs.strategies }}
           SCALP_OUT: ${{ inputs.out }}
+          MODULE: ${{ inputs.module }}
         run: |
-          python -m bot.scalp
-          cat "reports/${SCALP_OUT:-scalp}.md" >> "$GITHUB_STEP_SUMMARY"
+          case "$MODULE" in scalp|scalp5) ;; *) echo "Άγνωστη έρευνα: $MODULE"; exit 1;; esac
+          python -m "bot.$MODULE"
+          cat "reports/${SCALP_OUT:-$MODULE}.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Save report
         run: |
           git config user.name "backtest-bot"
