@@ -85,6 +85,9 @@ def main() -> None:
                 f"- Χαμηλό 20 ημερών {df['Low'].iloc[-20:].min():.2f} · χαμηλό 60 ημερών {df['Low'].iloc[-60:].min():.2f}"
                 f" · υψηλό 60 ημερών {df['High'].iloc[-60:].max():.2f} · υψηλό έτους {df['High'].iloc[-252:].max():.2f}",
                 f"- Μέσος 50 ημερών {e50:.2f} ({last / e50 - 1:+.1%}) · μέσος 150 ημερών {e150:.2f} ({last / e150 - 1:+.1%})"]
+        out += ["", "**Τελευταίες 10 συνεδριάσεις:**", "", "| Μέρα | Άνοιγμα | Υψηλό | Χαμηλό | Κλείσιμο |", "|---|---|---|---|---|"]
+        out += [f"| {d:%a %d/%m} | {r.Open:.2f} | {r.High:.2f} | {r.Low:.2f} | {r.Close:.2f} |"
+                for d, r in df.iloc[-10:].iterrows()]
         hist = df.index[150:]
         dip = hist[(df["Close"] / df["High"].rolling(60).max()).loc[hist] <= 0.90]
         for hold, title, combos in PLANS:
