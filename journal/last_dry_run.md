@@ -1,11 +1,6 @@
-# Τελευταία δοκιμή 2026-11-04 16:22 (Νέα Υόρκη) · ΣΦΑΛΜΑ
+# Τελευταία δοκιμή 2026-11-04 16:24 (Νέα Υόρκη) · ΣΦΑΛΜΑ
 
-- Έναρξη 04/11 16:21 Νέα Υόρκη · DEMO · ΔΟΚΙΜΗ (χωρίς εντολές)
-- Σφάλμα Capital.com: Αποτυχία σύνδεσης (504): <html>
-<head><title>504 Gateway Time-out</title></head>
-<body>
-<center><h1>504 Gateway Time-out</h1></center>
-<hr><center>nginx</center>
-</body>
-</html>
-
+- Έναρξη 04/11 16:23 Νέα Υόρκη · DEMO · ΔΟΚΙΜΗ (χωρίς εντολές)
+- ΣΦΑΛΜΑ: ReadTimeout: HTTPSConnectionPool(host='demo-api-capital.backend-capital.com', port=443): Read timed out. (read timeout=20)
+- File "/opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/requests/adapters.py", line 742, in send
+- raise ReadTimeout(e, request=request)
