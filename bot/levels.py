@@ -4,7 +4,7 @@
 συχνά στο παρελθόν μια αγορά έφτασε πρώτα στον στόχο ή στο stop για διάφορους συνδυασμούς (σε πολλαπλάσια του ATR).
 Αν σε μία μέρα αγγίχτηκαν και τα δύο, μετράει ως stop (συντηρητικά).
 
-Εκτέλεση:  python -m bot.levels   (σύμβολα από LEVELS_SYMBOLS, προεπιλογή SI=F = ασήμι)
+Εκτέλεση:  python -m bot.levels   (σύμβολα από LEVELS_SYMBOLS, προεπιλογή χρυσός GC=F και ασήμι SI=F)
 Γράφει το reports/levels.md
 """
 
@@ -65,7 +65,7 @@ def outcomes(df: pd.DataFrame, a: pd.Series, k_stop: float, k_tp: float | None, 
 
 
 def main() -> None:
-    symbols = [s.strip() for s in os.environ.get("LEVELS_SYMBOLS", "SI=F").split(",") if s.strip()]
+    symbols = [s.strip() for s in os.environ.get("LEVELS_SYMBOLS", "GC=F,SI=F").split(",") if s.strip()]
     out = ["# Επίπεδα για χειροκίνητη θέση", "",
            "Μόνο για ενημέρωση· το bot δεν το χρησιμοποιεί. Οι τιμές είναι του Yahoo (συμβόλαιο Comex): η τιμή της "
            "Capital.com διαφέρει λίγο, γι' αυτό τα επίπεδα δίνονται και σε % από την τιμή αγοράς.", ""]
