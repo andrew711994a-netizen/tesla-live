@@ -1,31 +1,31 @@
 {
- "updated": "2026-11-06",
+ "updated": "2026-11-09",
  "since": "2026-10-07",
  "missing": [],
  "closed": {
-  "trades": 21,
-  "win": 0.5238095238095238,
-  "avg_r": 0.15899635627748798,
-  "avg_pct": -0.0035709393505288286,
-  "total_r": 3.3389234818272477
+  "trades": 20,
+  "win": 0.55,
+  "avg_r": 0.19090988920114477,
+  "avg_pct": -0.0023235388962069723,
+  "total_r": 3.8181977840228956
  },
  "open": [
   {
    "symbol": "UNH",
    "date": "2026-10-16",
    "entry": 410.35,
-   "last_close": 395.72,
-   "result_pct": -3.7,
-   "r": -0.56,
+   "last_close": 394.15,
+   "result_pct": -4.09,
+   "r": -0.62,
    "real": false
   },
   {
    "symbol": "LLY",
    "date": "2026-10-30",
    "entry": 1428.83,
-   "last_close": 1364.73,
-   "result_pct": -4.62,
-   "r": -0.47,
+   "last_close": 1354.0,
+   "result_pct": -5.37,
+   "r": -0.55,
    "real": true
   }
  ],
