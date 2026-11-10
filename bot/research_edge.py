@@ -184,6 +184,35 @@ def efficiency(tab: pd.DataFrame, risk_per_trade: float, ms: list | None = None,
     return out
 
 
+def compare_curves(v: dict, b: dict, n_boot: int = N_BOOT) -> dict:
+    """Ζευγαρωτή σύγκριση μιας παραλλαγής (v) με το σημερινό bot (b)· και τα δύο: τεστ → {stats, lr, invested}.
+    «raw» = σκέτη διαφορά απόδοσης. Τα υπόλοιπα είναι με ίδιο ρίσκο: η απόδοση της παραλλαγής πολλαπλασιάζεται
+    ώστε οι ημερήσιες διακυμάνσεις της να είναι ίσες με του bot."""
+    t1, t2, t3 = (t for t, *_ in TESTS)
+
+    def by_uni(c: dict) -> dict:
+        return {"A": pd.concat([c[t1]["lr"], c[t2]["lr"]]).sort_index(), "B": c[t3]["lr"]}
+
+    lv, lb = by_uni(v), by_uni(b)
+    k = {u: float(lb[u].std() / lv[u].std()) if lv[u].std() > 0 else 1.0 for u in lv}
+    raw = {u: (lv[u] - lb[u]).dropna() for u in lv}
+    adj = {u: (k[u] * lv[u] - lb[u]).dropna() for u in lv}
+
+    def pool(d: dict) -> pd.Series:
+        return pd.concat([d["A"], d["B"]], axis=1, join="inner").mean(axis=1)
+
+    def per_test(d: dict) -> dict:
+        parts = {t1: d["A"].reindex(v[t1]["lr"].index), t2: d["A"].reindex(v[t2]["lr"].index), t3: d["B"]}
+        return {t: float(x.dropna().mean() * 252) if x.notna().any() else 0.0 for t, x in parts.items()}
+
+    return {"tests": per_test(adj), "raw_tests": per_test(raw), "scale": k,
+            "A": paired(adj["A"], n_boot), "B": paired(adj["B"], n_boot),
+            "pooled": paired(pool(adj), n_boot), "raw": paired(pool(raw), n_boot),
+            "stats": {t: v[t]["stats"] for t, *_ in TESTS},
+            "invested": {t: v[t]["invested"] for t, *_ in TESTS},
+            "dd_ok": all(v[t]["stats"]["max_dd"] >= b[t]["stats"]["max_dd"] - DD_TOL for t, *_ in TESTS)}
+
+
 # ───────────── Το εργαστήριο: προσομοιώσεις και πίνακες σημάτων ─────────────
 class Lab:
     def __init__(self, universes: dict, market: pd.DataFrame, p: Params, risk: Risk, costs: Costs, fl: dict,
@@ -223,32 +252,7 @@ class Lab:
         return self._curves[key]
 
     def compare(self, key: str, base_key: str = "base") -> dict:
-        """Ζευγαρωτή σύγκριση με το σημερινό bot. «raw» = σκέτη διαφορά απόδοσης. Τα υπόλοιπα είναι με ίδιο ρίσκο:
-        η απόδοση της παραλλαγής πολλαπλασιάζεται ώστε οι ημερήσιες διακυμάνσεις της να είναι ίσες με του bot."""
-        v, b = self._curves[key], self._curves[base_key]
-        t1, t2, t3 = (t for t, *_ in TESTS)
-
-        def by_uni(c: dict) -> dict:
-            return {"A": pd.concat([c[t1]["lr"], c[t2]["lr"]]).sort_index(), "B": c[t3]["lr"]}
-
-        lv, lb = by_uni(v), by_uni(b)
-        k = {u: float(lb[u].std() / lv[u].std()) if lv[u].std() > 0 else 1.0 for u in lv}
-        raw = {u: (lv[u] - lb[u]).dropna() for u in lv}
-        adj = {u: (k[u] * lv[u] - lb[u]).dropna() for u in lv}
-
-        def pool(d: dict) -> pd.Series:
-            return pd.concat([d["A"], d["B"]], axis=1, join="inner").mean(axis=1)
-
-        def per_test(d: dict) -> dict:
-            parts = {t1: d["A"].reindex(v[t1]["lr"].index), t2: d["A"].reindex(v[t2]["lr"].index), t3: d["B"]}
-            return {t: float(x.dropna().mean() * 252) if x.notna().any() else 0.0 for t, x in parts.items()}
-
-        return {"tests": per_test(adj), "raw_tests": per_test(raw), "scale": k,
-                "A": paired(adj["A"], self.n_boot), "B": paired(adj["B"], self.n_boot),
-                "pooled": paired(pool(adj), self.n_boot), "raw": paired(pool(raw), self.n_boot),
-                "stats": {t: v[t]["stats"] for t, *_ in TESTS},
-                "invested": {t: v[t]["invested"] for t, *_ in TESTS},
-                "dd_ok": all(v[t]["stats"]["max_dd"] >= b[t]["stats"]["max_dd"] - DD_TOL for t, *_ in TESTS)}
+        return compare_curves(self._curves[key], self._curves[base_key], self.n_boot)
 
     def signal_table(self, pchg: dict | None = None, feats: dict | None = None) -> pd.DataFrame:
         """Κάθε σήμα σαν να αγοράστηκε (χωρίς όριο θέσεων ή κεφαλαίου), με τα χαρακτηριστικά της μέρας του σήματος."""
